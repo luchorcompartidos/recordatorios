@@ -27,6 +27,10 @@ import android.view.Menu
 import android.view.MenuItem
 import android.widget.Toast
 import java.time.LocalDate
+import java.time.LocalTime
+import android.text.InputType
+import android.view.ContextThemeWrapper
+import android.widget.ScrollView
 import java.time.ZonedDateTime
 
 fun Activity.confirmarBorrado(r: Recordatorio, alTerminar: () -> Unit) {
@@ -38,24 +42,111 @@ fun Activity.confirmarBorrado(r: Recordatorio, alTerminar: () -> Unit) {
         .show()
 }
 
-/** Lista de 1, 2, 3, 4, 5 y 10 minutos. [alCerrar] recibe true si se pospuso. */
-fun Activity.elegirPosponer(id: Int, alCerrar: (Boolean) -> Unit) {
+fun Activity.temaDialogo(): Int {
     val nocturno = (resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) ==
         Configuration.UI_MODE_NIGHT_YES
-    val tema = if (nocturno) android.R.style.Theme_DeviceDefault_Dialog_Alert
-               else android.R.style.Theme_DeviceDefault_Light_Dialog_Alert
-    val opciones = Programador.OPCIONES_POSPONER
-    val textos = opciones.map { if (it == 1) "1 minuto" else "$it minutos" }.toTypedArray()
+    return if (nocturno) android.R.style.Theme_DeviceDefault_Dialog_Alert
+           else android.R.style.Theme_DeviceDefault_Light_Dialog_Alert
+}
+
+/** Aplica la posposición y avisa hasta cuándo quedó. */
+fun Activity.aplicarPosponer(id: Int, codigo: String): Boolean {
+    val momento = Programador.posponer(this, id, codigo)
+    val texto = if (momento != null) "Pospuesto hasta el " + Formato.completo(momento)
+                else "No se pudo posponer: elegí un momento futuro"
+    Toast.makeText(this, texto, Toast.LENGTH_LONG).show()
+    return momento != null
+}
+
+/** Set completo de opciones + "Personalizado…". [alCerrar] recibe true si se pospuso. */
+fun Activity.elegirPosponer(id: Int, alCerrar: (Boolean) -> Unit) {
+    val opciones = Posposicion.OPCIONES
+    val textos = (opciones.map { it.texto } + "Personalizado…").toTypedArray()
     var pospuesto = false
-    AlertDialog.Builder(this, tema)
+    var sigue = false
+    AlertDialog.Builder(this, temaDialogo())
         .setTitle("Posponer")
         .setItems(textos) { _, i ->
-            Programador.posponer(this, id, opciones[i])
-            pospuesto = true
-            Toast.makeText(this, "Pospuesto ${textos[i]}", Toast.LENGTH_SHORT).show()
+            if (i == opciones.size) {
+                sigue = true
+                elegirPersonalizado(id, alCerrar)
+            } else {
+                pospuesto = aplicarPosponer(id, opciones[i].codigo)
+            }
         }
         .setNegativeButton("Cancelar", null)
-        .setOnDismissListener { alCerrar(pospuesto) }
+        .setOnDismissListener { if (!sigue) alCerrar(pospuesto) }
+        .show()
+}
+
+private fun Activity.elegirPersonalizado(id: Int, alCerrar: (Boolean) -> Unit) {
+    var sigue = false
+    AlertDialog.Builder(this, temaDialogo())
+        .setTitle("Personalizado")
+        .setItems(arrayOf("Fecha y hora puntuales", "Plazo (número y unidad)")) { _, i ->
+            sigue = true
+            if (i == 0) elegirFechaHora(id, alCerrar) else elegirPlazo(id, alCerrar)
+        }
+        .setNegativeButton("Cancelar", null)
+        .setOnDismissListener { if (!sigue) alCerrar(false) }
+        .show()
+}
+
+private fun Activity.elegirFechaHora(id: Int, alCerrar: (Boolean) -> Unit) {
+    val ahora = ZonedDateTime.now()
+    var fechaElegida = false
+    val dp = DatePickerDialog(this, temaDialogo(), { _, a, m, d ->
+        fechaElegida = true
+        var horaElegida = false
+        val tp = TimePickerDialog(this, temaDialogo(), { _, h, min ->
+            horaElegida = true
+            val ms = ZonedDateTime.of(LocalDate.of(a, m + 1, d), LocalTime.of(h, min), ahora.zone)
+                .toInstant().toEpochMilli()
+            alCerrar(aplicarPosponer(id, "t:$ms"))
+        }, ahora.hour, ahora.minute, true)
+        tp.setOnDismissListener { if (!horaElegida) alCerrar(false) }
+        tp.show()
+    }, ahora.year, ahora.monthValue - 1, ahora.dayOfMonth)
+    dp.datePicker.minDate = System.currentTimeMillis() - 1000
+    dp.setOnDismissListener { if (!fechaElegida) alCerrar(false) }
+    dp.show()
+}
+
+private fun Activity.elegirPlazo(id: Int, alCerrar: (Boolean) -> Unit) {
+    val c = ContextThemeWrapper(this, temaDialogo())
+    val margen = (20 * resources.displayMetrics.density).toInt()
+    val unidades = listOf("Minutos" to "m", "Horas" to "h", "Días" to "d",
+        "Semanas" to "w", "Meses" to "M", "Años" to "y")
+    val numero = EditText(c).apply {
+        inputType = InputType.TYPE_CLASS_NUMBER
+        setText("1")
+        setSelectAllOnFocus(true)
+    }
+    val unidad = Spinner(c).apply {
+        adapter = ArrayAdapter(c, android.R.layout.simple_spinner_dropdown_item, unidades.map { it.first })
+    }
+    val caja = LinearLayout(c).apply {
+        orientation = LinearLayout.HORIZONTAL
+        setPadding(margen, margen / 2, margen, 0)
+        addView(numero, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+        addView(unidad, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 2f))
+    }
+    var listo = false
+    AlertDialog.Builder(this, temaDialogo())
+        .setTitle("Posponer durante")
+        .setView(caja)
+        .setPositiveButton("Posponer") { _, _ ->
+            listo = true
+            val n = numero.text.toString().toIntOrNull()
+            if (n == null || n <= 0 || n > 10_000) {
+                Toast.makeText(this, "Ingresá un número entre 1 y 10000", Toast.LENGTH_LONG).show()
+                alCerrar(false)
+            } else {
+                alCerrar(aplicarPosponer(id, "${unidades[unidad.selectedItemPosition].second}:$n"))
+            }
+        }
+        .setNegativeButton("Cancelar", null)
+        .setOnDismissListener { if (!listo) alCerrar(false) }
         .show()
 }
 
@@ -106,9 +197,10 @@ class AlarmaActivity : Activity() {
             getSystemService(NotificationManager::class.java).cancel(id)
             finish()
         }
-        findViewById<Button>(R.id.alPosponer5).setOnClickListener {
-            Programador.posponer(this, id, 5)
-            finish()
+        val rapido = Ajustes.posponerRapido(this)
+        findViewById<Button>(R.id.alPosponer5).apply {
+            text = Posposicion.textoBoton(rapido)
+            setOnClickListener { if (aplicarPosponer(id, rapido)) finish() }
         }
         findViewById<Button>(R.id.alPosponerOtro).setOnClickListener {
             elegirPosponer(id) { pospuesto -> if (pospuesto) finish() }
@@ -137,11 +229,36 @@ class AjustesActivity : Activity() {
                 "Siempre se puede cambiar en cada uno."
             setPadding(0, margen / 2, 0, 0)
         }
-        setContentView(LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(margen, margen, margen, margen)
-            addView(sw)
-            addView(ayuda)
+        val tituloRapido = TextView(this).apply {
+            text = "Botón rápido de Posponer en las notificaciones"
+            textSize = 16f
+            setPadding(0, margen * 2, 0, margen / 2)
+        }
+        val btnRapido = Button(this)
+        fun refrescar() { btnRapido.text = Posposicion.texto(Ajustes.posponerRapido(this)) }
+        refrescar()
+        btnRapido.setOnClickListener {
+            val ops = Posposicion.OPCIONES
+            val actual = ops.indexOfFirst { it.codigo == Ajustes.posponerRapido(this) }
+            AlertDialog.Builder(this, temaDialogo())
+                .setTitle("Posponer rápido")
+                .setSingleChoiceItems(ops.map { it.texto }.toTypedArray(), actual) { d, i ->
+                    Ajustes.guardarPosponerRapido(this, ops[i].codigo)
+                    refrescar()
+                    d.dismiss()
+                }
+                .setNegativeButton("Cancelar", null)
+                .show()
+        }
+        setContentView(ScrollView(this).apply {
+            addView(LinearLayout(this@AjustesActivity).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(margen, margen, margen, margen)
+                addView(sw)
+                addView(ayuda)
+                addView(tituloRapido)
+                addView(btnRapido)
+            })
         })
     }
 }
@@ -300,7 +417,7 @@ class EditarActivity : Activity() {
         } else {
             title = "Nuevo recordatorio"
             cbAlarma.isChecked = Ajustes.alarmaPorDefecto(this)
-            fechaHora = ZonedDateTime.now().plusHours(1).withMinute(0).withSecond(0).withNano(0)
+            fechaHora = ZonedDateTime.now().withSecond(0).withNano(0)
         }
         actualizarBotones()
 
@@ -311,10 +428,11 @@ class EditarActivity : Activity() {
             }, fechaHora.year, fechaHora.monthValue - 1, fechaHora.dayOfMonth).show()
         }
         btnHora.setOnClickListener {
+            val ahora = ZonedDateTime.now()   // el selector arranca en la hora actual
             TimePickerDialog(this, { _, h, min ->
                 fechaHora = fechaHora.withHour(h).withMinute(min).withSecond(0).withNano(0)
                 actualizarBotones()
-            }, fechaHora.hour, fechaHora.minute, true).show()
+            }, ahora.hour, ahora.minute, true).show()
         }
         findViewById<Button>(R.id.btnGuardar).setOnClickListener { guardar() }
     }

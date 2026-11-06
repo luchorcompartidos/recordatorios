@@ -30,13 +30,14 @@ data class Recordatorio(
     var dias: MutableSet<Int>,      // para semanal: 1 = lunes … 7 = domingo
     var diaMes: Int,                // para mensual: día del mes elegido
     var activo: Boolean,            // false = vencido (no se repite y ya sonó)
-    var alarma: Boolean = false     // true = suena como alarma con pantalla completa
+    var alarma: Boolean = false,    // true = suena como alarma con pantalla completa
+    var pospuestoHasta: Long = 0    // > 0 = hay una posposición pendiente (sobrevive a reinicios)
 ) {
     fun aJson(): JSONObject = JSONObject()
         .put("id", id).put("titulo", titulo).put("nota", nota)
         .put("proxima", proxima).put("rep", repeticion.codigo)
         .put("dias", JSONArray(dias.toList())).put("diaMes", diaMes)
-        .put("activo", activo).put("alarma", alarma)
+        .put("activo", activo).put("alarma", alarma).put("posp", pospuestoHasta)
 
     companion object {
         fun desdeJson(o: JSONObject): Recordatorio {
@@ -50,7 +51,8 @@ data class Recordatorio(
                 dias = MutableList(arr.length()) { arr.getInt(it) }.toMutableSet(),
                 diaMes = o.optInt("diaMes", 1),
                 activo = o.optBoolean("activo", true),
-                alarma = o.optBoolean("alarma", false)
+                alarma = o.optBoolean("alarma", false),
+                pospuestoHasta = o.optLong("posp", 0)
             )
         }
     }
@@ -95,6 +97,51 @@ object Repositorio {
         val n = prefs(ctx).getInt(CLAVE_ID, 0) + 1
         prefs(ctx).edit().putInt(CLAVE_ID, n).commit()
         return n
+    }
+}
+
+/**
+ * Opciones de posponer. Códigos: "m:N" minutos, "h:N" horas, "d:N" días, "w:N" semanas,
+ * "M:N" meses, "y:N" años, "manana" = mañana a la hora del recordatorio, "t:ms" = momento puntual.
+ */
+data class OpcionPosponer(val codigo: String, val texto: String)
+
+object Posposicion {
+    const val POR_DEFECTO = "m:10"
+
+    val OPCIONES: List<OpcionPosponer> =
+        listOf(1, 2, 3, 4, 5, 10, 15, 30, 45, 55).map { OpcionPosponer("m:$it", if (it == 1) "1 minuto" else "$it minutos") } +
+        listOf(1, 2, 3, 5, 12).map { OpcionPosponer("h:$it", if (it == 1) "1 hora" else "$it horas") } +
+        listOf(
+            OpcionPosponer("manana", "Mañana a la misma hora"),
+            OpcionPosponer("w:1", "1 semana"),
+            OpcionPosponer("M:1", "1 mes"),
+            OpcionPosponer("y:1", "1 año")
+        )
+
+    fun texto(codigo: String) = OPCIONES.firstOrNull { it.codigo == codigo }?.texto ?: "10 minutos"
+
+    /** Texto para un botón: "Posponer 10 minutos", "Posponer mañana a la misma hora". */
+    fun textoBoton(codigo: String) = "Posponer " + texto(codigo).replaceFirstChar { it.lowercase() }
+
+    fun momento(codigo: String, r: Recordatorio, ahora: ZonedDateTime = ZonedDateTime.now()): Long? {
+        if (codigo == "manana") {
+            val hora = Calculo.zdt(r.proxima).toLocalTime().withSecond(0).withNano(0)
+            return ahora.toLocalDate().plusDays(1).atTime(hora).atZone(ahora.zone).toInstant().toEpochMilli()
+        }
+        val partes = codigo.split(":")
+        val n = partes.getOrNull(1)?.toLongOrNull() ?: return null
+        val t = when (partes[0]) {
+            "t" -> return n
+            "m" -> ahora.plusMinutes(n)
+            "h" -> ahora.plusHours(n)
+            "d" -> ahora.plusDays(n)
+            "w" -> ahora.plusWeeks(n)
+            "M" -> ahora.plusMonths(n)
+            "y" -> ahora.plusYears(n)
+            else -> return null
+        }
+        return t.withNano(0).toInstant().toEpochMilli()
     }
 }
 

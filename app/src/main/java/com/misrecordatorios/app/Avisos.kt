@@ -18,8 +18,7 @@ import java.util.Locale
 object Programador {
     const val EXTRA_ID = "id"
     const val EXTRA_POSPUESTO = "pospuesto"
-    const val EXTRA_MINUTOS = "minutos"
-    val OPCIONES_POSPONER = listOf(1, 2, 3, 4, 5, 10)
+    const val EXTRA_CODIGO = "codigo"
 
     private fun pendiente(ctx: Context, id: Int, pospuesto: Boolean): PendingIntent {
         val i = Intent(ctx, AlarmaReceiver::class.java)
@@ -45,10 +44,16 @@ object Programador {
         if (r.activo) alarmaEn(ctx, r.proxima, pendiente(ctx, r.id, false))
     }
 
-    fun posponer(ctx: Context, id: Int, minutos: Int) {
+    /** Pospone según el código de [Posposicion]. Devuelve el momento elegido, o null si no se pudo. */
+    fun posponer(ctx: Context, id: Int, codigo: String): Long? {
+        val r = Repositorio.obtener(ctx, id) ?: return null
+        val momento = Posposicion.momento(codigo, r) ?: return null
+        if (momento <= System.currentTimeMillis()) return null
         ctx.getSystemService(NotificationManager::class.java).cancel(id)
-        val momento = System.currentTimeMillis() + minutos * 60_000L
+        r.pospuestoHasta = momento
+        Repositorio.guardar(ctx, r)
         alarmaEn(ctx, momento, pendiente(ctx, id, true))
+        return momento
     }
 
     fun cancelar(ctx: Context, id: Int, incluirPospuesto: Boolean = true) {
@@ -74,7 +79,17 @@ object Programador {
     /** Tras reiniciar el celular, cambiar la hora o actualizar la app. */
     fun reprogramarTodos(ctx: Context) {
         val ahora = System.currentTimeMillis()
-        Repositorio.todos(ctx).filter { it.activo }.forEach { r ->
+        Repositorio.todos(ctx).forEach { r ->
+            if (r.pospuestoHasta > 0) {
+                if (r.pospuestoHasta <= ahora) {
+                    r.pospuestoHasta = 0
+                    Repositorio.guardar(ctx, r)
+                    Notificador.mostrar(ctx, r, comoAlarma = false)
+                } else {
+                    alarmaEn(ctx, r.pospuestoHasta, pendiente(ctx, r.id, true))
+                }
+            }
+            if (!r.activo) return@forEach
             if (r.proxima <= ahora) {
                 Notificador.mostrar(ctx, r, comoAlarma = false)   // se perdió mientras estaba apagado
                 avanzar(ctx, r)
@@ -90,6 +105,10 @@ object Ajustes {
     fun alarmaPorDefecto(ctx: Context) = prefs(ctx).getBoolean("alarma_defecto", false)
     fun guardarAlarmaPorDefecto(ctx: Context, valor: Boolean) =
         prefs(ctx).edit().putBoolean("alarma_defecto", valor).apply()
+    fun posponerRapido(ctx: Context): String =
+        prefs(ctx).getString("posponer_rapido", Posposicion.POR_DEFECTO) ?: Posposicion.POR_DEFECTO
+    fun guardarPosponerRapido(ctx: Context, codigo: String) =
+        prefs(ctx).edit().putString("posponer_rapido", codigo).apply()
 }
 
 object Notificador {
@@ -138,9 +157,9 @@ object Notificador {
     private fun boton(ctx: Context, texto: String, pi: PendingIntent) =
         Notification.Action.Builder(Icon.createWithResource(ctx, R.drawable.ic_notif), texto, pi).build()
 
-    private fun accion(ctx: Context, id: Int, accion: String, minutos: Int = 0): PendingIntent {
+    private fun accion(ctx: Context, id: Int, accion: String, codigo: String = ""): PendingIntent {
         val i = Intent(ctx, AccionReceiver::class.java).setAction(accion)
-            .putExtra(Programador.EXTRA_ID, id).putExtra(Programador.EXTRA_MINUTOS, minutos)
+            .putExtra(Programador.EXTRA_ID, id).putExtra(Programador.EXTRA_CODIGO, codigo)
         return PendingIntent.getBroadcast(ctx, id, i,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
     }
@@ -159,6 +178,7 @@ object Notificador {
             Intent(ctx, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
         val texto = r.nota.ifBlank { "Recordatorio de las " + Formato.hora(r.proxima) }
+        val rapido = Ajustes.posponerRapido(ctx)
         val canal = when {
             !comoAlarma -> CANAL
             silenciada -> CANAL_MUDO
@@ -184,12 +204,12 @@ object Notificador {
                 .setOnlyAlertOnce(silenciada)
                 .addAction(boton(ctx, "Posponer…", elegir))
             if (!silenciada) b.addAction(boton(ctx, "Callar", accion(ctx, r.id, ACCION_CALLAR)))
-            else b.addAction(boton(ctx, "Posponer 5 min", accion(ctx, r.id, ACCION_POSPONER, 5)))
+            else b.addAction(boton(ctx, Posposicion.textoBoton(rapido), accion(ctx, r.id, ACCION_POSPONER, rapido)))
         } else {
             b.setCategory(Notification.CATEGORY_REMINDER)
                 .setWhen(System.currentTimeMillis())
                 .setContentIntent(abrir)
-                .addAction(boton(ctx, "Posponer 5 min", accion(ctx, r.id, ACCION_POSPONER, 5)))
+                .addAction(boton(ctx, Posposicion.textoBoton(rapido), accion(ctx, r.id, ACCION_POSPONER, rapido)))
                 .addAction(boton(ctx, "Posponer…", elegir))
         }
         val n = b.build()
@@ -228,6 +248,9 @@ class AlarmaReceiver : BroadcastReceiver() {
         val r = Repositorio.obtener(ctx, intent.getIntExtra(Programador.EXTRA_ID, -1)) ?: return
         val pospuesto = intent.getBooleanExtra(Programador.EXTRA_POSPUESTO, false)
         if (pospuesto) {
+            if (r.pospuestoHasta == 0L) return   // la posposición se canceló (por ejemplo, al editar)
+            r.pospuestoHasta = 0
+            Repositorio.guardar(ctx, r)
             Notificador.mostrar(ctx, r)
             return
         }
@@ -245,7 +268,8 @@ class AccionReceiver : BroadcastReceiver() {
         when (intent.action) {
             Notificador.ACCION_CALLAR -> Notificador.silenciar(ctx, id)
             Notificador.ACCION_POSPONER ->
-                Programador.posponer(ctx, id, intent.getIntExtra(Programador.EXTRA_MINUTOS, 5))
+                Programador.posponer(ctx, id,
+                    intent.getStringExtra(Programador.EXTRA_CODIGO) ?: Posposicion.POR_DEFECTO)
             else -> ctx.getSystemService(NotificationManager::class.java).cancel(id)
         }
     }
