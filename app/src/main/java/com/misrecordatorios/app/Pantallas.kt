@@ -53,7 +53,7 @@ fun Activity.temaDialogo(): Int {
 fun Activity.aplicarPosponer(id: Int, codigo: String): Boolean {
     val momento = Programador.posponer(this, id, codigo)
     val texto = if (momento != null) "Pospuesto hasta el " + Formato.completo(momento)
-                else "No se pudo posponer: elegí un momento futuro"
+                else "No se pudo posponer: " + Programador.motivo
     Toast.makeText(this, texto, Toast.LENGTH_LONG).show()
     return momento != null
 }
@@ -97,13 +97,24 @@ private fun Activity.elegirFechaHora(id: Int, alCerrar: (Boolean) -> Unit) {
     var fechaElegida = false
     val dp = DatePickerDialog(this, temaDialogo(), { _, a, m, d ->
         fechaElegida = true
-        // La hora arranca en la última usada en "Personalizado" (o en la actual).
-        val inicial = Ajustes.ultimaHora(this) ?: ahora.toLocalTime()
-        elegirHora(inicial, alCancelar = { alCerrar(false) }) { t ->
-            Ajustes.guardarUltimaHora(this, t)
-            val ms = ZonedDateTime.of(LocalDate.of(a, m + 1, d), t, ahora.zone).toInstant().toEpochMilli()
-            alCerrar(aplicarPosponer(id, "t:$ms"))
+        // La hora arranca en la última usada en "Personalizado"; si es hoy y esa hora ya pasó, en la actual.
+        val fecha = LocalDate.of(a, m + 1, d)
+        val horaActual = LocalTime.now().withSecond(0).withNano(0)
+        val ultima = Ajustes.ultimaHora(this)
+        val inicial = if (ultima == null || (fecha == LocalDate.now() && !ultima.isAfter(horaActual))) horaActual else ultima
+        fun pedirHora(desde: LocalTime) {
+            elegirHora(desde, alCancelar = { alCerrar(false) }) { t ->
+                val ms = ZonedDateTime.of(fecha, t, ahora.zone).toInstant().toEpochMilli()
+                if (ms <= System.currentTimeMillis()) {
+                    Toast.makeText(this, "Esa hora ya pasó. Elegí una hora futura.", Toast.LENGTH_LONG).show()
+                    pedirHora(t)   // vuelve a mostrar el selector en lugar de fallar
+                } else {
+                    Ajustes.guardarUltimaHora(this, t)
+                    alCerrar(aplicarPosponer(id, "t:$ms"))
+                }
+            }
         }
+        pedirHora(inicial)
     }, ahora.year, ahora.monthValue - 1, ahora.dayOfMonth)
     dp.datePicker.minDate = System.currentTimeMillis() - 1000
     dp.setOnDismissListener { if (!fechaElegida) alCerrar(false) }
@@ -187,9 +198,15 @@ class AlarmaActivity : Activity() {
         val r = Repositorio.obtener(this, id) ?: run { finish(); return }
         findViewById<TextView>(R.id.alHora).text = Formato.hora(System.currentTimeMillis())
         findViewById<TextView>(R.id.alTitulo).text = r.titulo
+        val pospuesta = Notificador.esPospuesta(this, id)
+        val nota = if (pospuesta) "Original vencido" + (if (r.nota.isBlank()) "" else "\n" + r.nota) else r.nota
         findViewById<TextView>(R.id.alNota).apply {
-            text = r.nota
-            visibility = if (r.nota.isBlank()) View.GONE else View.VISIBLE
+            text = nota
+            visibility = if (nota.isBlank()) View.GONE else View.VISIBLE
+        }
+        findViewById<Button>(R.id.alWhatsapp).apply {
+            visibility = if (Contactos.activos(this@AlarmaActivity).any { it.modo.whatsapp }) View.VISIBLE else View.GONE
+            setOnClickListener { startActivity(Envios.intentWhatsapp(this@AlarmaActivity, id, pospuesta)) }
         }
         val callar = findViewById<Button>(R.id.alCallar)
         callar.isEnabled = true
@@ -304,8 +321,11 @@ class MainActivity : Activity() {
             return
         }
         val proximos = todos.filter { it.activo }.sortedBy { it.proxima }
-        val vencidos = todos.filter { !it.activo }.sortedByDescending { it.proxima }
-        if (proximos.isNotEmpty()) { agregarTitulo("Próximos"); proximos.forEach { agregarItem(it) } }
+        val pospuestos = todos.filter { it.pospuestoHasta > 0 }.sortedBy { it.pospuestoHasta }
+        val vencidos = todos.filter { !it.activo && it.pospuestoHasta == 0L }.sortedByDescending { it.proxima }
+        if (proximos.isNotEmpty() || pospuestos.isNotEmpty()) agregarTitulo("Próximos")
+        proximos.forEach { agregarItem(it) }
+        if (pospuestos.isNotEmpty()) { agregarTitulo("   Pospuestos"); pospuestos.forEach { agregarItem(it, pospuesto = true) } }
         if (vencidos.isNotEmpty()) { agregarTitulo("Vencidos"); vencidos.forEach { agregarItem(it) } }
     }
 
@@ -315,11 +335,14 @@ class MainActivity : Activity() {
         lista.addView(v)
     }
 
-    private fun agregarItem(r: Recordatorio) {
+    private fun agregarItem(r: Recordatorio, pospuesto: Boolean = false) {
         val v = layoutInflater.inflate(R.layout.item_recordatorio, lista, false)
-        v.findViewById<TextView>(R.id.titulo).text = r.titulo
-        v.findViewById<TextView>(R.id.detalle).text = Formato.detalle(r)
-        if (!r.activo) v.alpha = 0.55f
+        v.findViewById<TextView>(R.id.titulo).text =
+            if (pospuesto) r.titulo + " {\"Original Vencido\"}" else r.titulo
+        v.findViewById<TextView>(R.id.detalle).text =
+            if (pospuesto) "Pospuesto hasta el " + Formato.completo(r.pospuestoHasta) else Formato.detalle(r)
+        if (pospuesto) v.setPadding(v.paddingLeft * 3, v.paddingTop, v.paddingRight, v.paddingBottom)
+        else if (!r.activo) v.alpha = 0.55f
         v.setOnClickListener {
             startActivity(Intent(this, EditarActivity::class.java).putExtra(Programador.EXTRA_ID, r.id))
         }
@@ -450,6 +473,14 @@ class EditarActivity : Activity() {
         Repositorio.guardar(this, r)
         Programador.programar(this, r)
         aviso("Guardado para el " + Formato.completo(r.proxima))
-        finish()
+        val destinatarios = Contactos.resumen(this)
+        if (destinatarios == null) { finish(); return }
+        AlertDialog.Builder(this)
+            .setTitle("Aviso a contactos")
+            .setMessage("Cuando suene este recordatorio se avisará a:\n\n$destinatarios\n\n" +
+                "El SMS se envía solo; el WhatsApp queda listo para que lo envíes con un toque.")
+            .setPositiveButton("Entendido", null)
+            .setOnDismissListener { finish() }
+            .show()
     }
 }

@@ -350,6 +350,14 @@ class AjustesActivity : Activity() {
                 .show()
         }
 
+        seccion("AVISOS A CONTACTOS")
+        texto("Cuando suena un recordatorio se avisa a estos números. Tocá un contacto para editarlo o elegir el medio: " +
+            "SMS (se envía solo), WhatsApp (queda listo para enviar con un toque) o ambos.")
+        val contenedorContactos = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        raiz.addView(contenedorContactos)
+        armarContactos(contenedorContactos)
+        boton("Agregar contacto") { editarContacto(contenedorContactos, -1) }
+
         seccion("COPIA DE SEGURIDAD")
         estadoCopia = texto("")
         boton("Crear copia de seguridad") {
@@ -372,6 +380,17 @@ class AjustesActivity : Activity() {
             AlertDialog.Builder(this, temaDialogo())
                 .setTitle("Registro de eventos")
                 .setMessage(Registro.texto(this))
+                .setPositiveButton("Cerrar", null)
+                .show()
+        }
+
+        seccion("ACERCA DE")
+        val version = runCatching { packageManager.getPackageInfo(packageName, 0).versionName }.getOrNull() ?: "?"
+        texto("Versión instalada: $version")
+        boton("Ver cambios (ChangeLog)") {
+            AlertDialog.Builder(this, temaDialogo())
+                .setTitle("Historial de cambios")
+                .setMessage(Cambios.texto())
                 .setPositiveButton("Cerrar", null)
                 .show()
         }

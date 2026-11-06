@@ -5,6 +5,8 @@
     <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
+    <uses-permission android:name="android.permission.SEND_SMS" />
+    <uses-feature android:name="android.hardware.telephony" android:required="false" />
 
     <application
         android:allowBackup="true"
@@ -42,6 +44,13 @@
             android:showWhenLocked="true"
             android:taskAffinity="com.misrecordatorios.alarma"
             android:turnScreenOn="true" />
+
+        <activity
+            android:name=".EnviarWhatsappActivity"
+            android:excludeFromRecents="true"
+            android:exported="false"
+            android:taskAffinity=""
+            android:theme="@style/TemaTransparente" />
 
         <activity
             android:name=".AjustesActivity"
