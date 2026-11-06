@@ -310,7 +310,7 @@ class EnviarWhatsappActivity : Activity() {
         txt("«Uno por uno» abre cada chat con el mensaje escrito: tocá Enviar en WhatsApp y volvé acá " +
             "(desde Recientes o desde la notificación) para seguir con el próximo. «Elegir varios» abre WhatsApp " +
             "para que marques los chats y envíes el mismo mensaje a todos de una vez.", 12f)
-        btn("Terminar") { quitarProgreso(); finish() }
+        btn("Terminar") { terminar() }
     }
 
     private fun enviarSiguiente() {
@@ -347,6 +347,14 @@ class EnviarWhatsappActivity : Activity() {
             .setContentIntent(pi)
             .setOnlyAlertOnce(true)
             .build())
+    }
+
+    /** Vuelve a la lista de recordatorios y cierra esta pantalla (también de Recientes). */
+    private fun terminar() {
+        quitarProgreso()
+        startActivity(Intent(this, MainActivity::class.java)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP))
+        finishAndRemoveTask()
     }
 
     private fun quitarProgreso() = getSystemService(NotificationManager::class.java).cancel(ID_PROGRESO)
@@ -387,6 +395,9 @@ fun Activity.armarContactos(contenedor: LinearLayout) {
     lista.forEachIndexed { i, c ->
         contenedor.addView(LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
+            // Sin alinear por la línea base: si no, el texto de 2 líneas baja y se corta la segunda.
+            isBaselineAligned = false
+            gravity = android.view.Gravity.CENTER_VERTICAL
             setPadding(0, m, 0, m)
             addView(CheckBox(this@armarContactos).apply {
                 isChecked = c.porDefecto
@@ -582,6 +593,12 @@ fun Activity.confirmarAvisos(r: Recordatorio, motivo: String, alTerminar: () -> 
 /** Historial de cambios (ChangeLog). Se agrega una entrada con cada versión nueva. */
 object Cambios {
     private val versiones = listOf(
+        "1.7.1" to listOf(
+            "Corrección: en la pantalla completa, «Enviar por WhatsApp», «Posponer» y «Editar» usaban un identificador " +
+                "equivocado («No se encontró el recordatorio»).",
+            "Corrección: en Ajustes, la segunda línea de cada contacto ya no se ve cortada.",
+            "«Terminar» en la pantalla de WhatsApp vuelve a la lista de recordatorios."
+        ),
         "1.7" to listOf(
             "Al agregar un contacto: grupo Default desmarcado y medio «Solo WhatsApp» por defecto.",
             "Nueva pantalla «Enviar por WhatsApp»: casillas por contacto, envío uno por uno que se retoma al volver " +

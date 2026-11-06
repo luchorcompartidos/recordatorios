@@ -179,7 +179,7 @@ class PosponerActivity : Activity() {
 
 /** Pantalla de alarma: aparece sobre la pantalla bloqueada. */
 class AlarmaActivity : Activity() {
-    private var id = -1
+    private var recId = -1   // id del recordatorio (no confundir con el id de una vista)
 
     override fun onCreate(estado: Bundle?) {
         super.onCreate(estado)
@@ -196,11 +196,11 @@ class AlarmaActivity : Activity() {
     }
 
     private fun cargar(i: Intent) {
-        id = i.getIntExtra(Programador.EXTRA_ID, -1)
-        val r = Repositorio.obtener(this, id) ?: run { finish(); return }
+        recId = i.getIntExtra(Programador.EXTRA_ID, -1)
+        val r = Repositorio.obtener(this, recId) ?: run { finish(); return }
         findViewById<TextView>(R.id.alHora).text = Formato.hora(System.currentTimeMillis())
         findViewById<TextView>(R.id.alTitulo).text = r.titulo
-        val pospuesta = Notificador.esPospuesta(this, id)
+        val pospuesta = Notificador.esPospuesta(this, recId)
         val nota = if (pospuesta) "{\"Original Vencido\"}" + (if (r.nota.isBlank()) "" else "\n" + r.nota) else r.nota
         findViewById<TextView>(R.id.alNota).apply {
             text = nota
@@ -210,43 +210,43 @@ class AlarmaActivity : Activity() {
             val wa = Envios.destinatarios(this@AlarmaActivity, r).filter { it.modo.whatsapp }
             visibility = if (wa.isNotEmpty()) View.VISIBLE else View.GONE
             setOnClickListener {
-                Registro.anotar(this@AlarmaActivity, "#$id botón WhatsApp de la pantalla completa")
-                Notificador.silenciar(this@AlarmaActivity, id)
-                startActivity(Envios.intentWhatsapp(this@AlarmaActivity, id, Envios.AHORA, pospuesta, wa.map { it.id }))
+                Registro.anotar(this@AlarmaActivity, "#$recId botón WhatsApp de la pantalla completa")
+                Notificador.silenciar(this@AlarmaActivity, recId)
+                startActivity(Envios.intentWhatsapp(this@AlarmaActivity, recId, Envios.AHORA, pospuesta, wa.map { it.id }))
             }
         }
         val callar = findViewById<Button>(R.id.alCallar)
         callar.isEnabled = true
         callar.text = "Callar"
         callar.setOnClickListener {
-            Notificador.silenciar(this, id)
+            Notificador.silenciar(this, recId)
             callar.isEnabled = false
             callar.text = "Silenciada"
         }
         findViewById<Button>(R.id.alHecho).setOnClickListener {
-            Notificador.quitar(this, id)
+            Notificador.quitar(this, recId)
             finish()
         }
         val rapido = Ajustes.posponerRapido(this)
         findViewById<Button>(R.id.alPosponer5).apply {
             text = Posposicion.textoBoton(rapido)
             setOnClickListener {
-                if (rapido == Posposicion.PERSONALIZADO) elegirPersonalizado(id) { pospuesto -> if (pospuesto) finish() }
-                else if (aplicarPosponer(id, rapido)) finish()
+                if (rapido == Posposicion.PERSONALIZADO) elegirPersonalizado(recId) { pospuesto -> if (pospuesto) finish() }
+                else if (aplicarPosponer(recId, rapido)) finish()
             }
         }
         findViewById<Button>(R.id.alPosponerOtro).setOnClickListener {
-            elegirPosponer(id) { pospuesto -> if (pospuesto) finish() }
+            elegirPosponer(recId) { pospuesto -> if (pospuesto) finish() }
         }
         findViewById<Button>(R.id.alEditar).setOnClickListener {
-            Notificador.silenciar(this, id)
+            Notificador.silenciar(this, recId)
             conDesbloqueo {
-                startActivity(Intent(this, EditarActivity::class.java).putExtra(Programador.EXTRA_ID, id))
+                startActivity(Intent(this, EditarActivity::class.java).putExtra(Programador.EXTRA_ID, recId))
                 finish()
             }
         }
         findViewById<Button>(R.id.alCerrar).setOnClickListener {
-            Notificador.silenciar(this, id)   // la notificación queda en la bandeja, sin sonido
+            Notificador.silenciar(this, recId)   // la notificación queda en la bandeja, sin sonido
             finish()
         }
     }
