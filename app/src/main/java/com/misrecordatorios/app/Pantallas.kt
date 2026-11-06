@@ -261,6 +261,25 @@ class MainActivity : Activity() {
         super.onCreate(estado)
         setContentView(R.layout.activity_main)
         lista = findViewById(R.id.lista)
+        findViewById<Button>(R.id.btnSms).setOnClickListener {
+            val suspendidos = SuspensionSms.activa(this)
+            AlertDialog.Builder(this, temaDialogo())
+                .setTitle(if (suspendidos) "Reanudar SMS" else "Suspender/Anular SMS")
+                .setMessage(if (suspendidos)
+                    "Se vuelven a permitir los SMS, pero se arranca de cero: los recordatorios afectados por la " +
+                        "suspensión siguen SIN SMS. Para que uno vuelva a enviarlos, editalo y desmarcá «Anular envío de SMS». " +
+                        "Los recordatorios nuevos usan SMS según cada contacto."
+                else
+                    "Se anulan los SMS de todos los recordatorios vigentes (los programados dejan de existir) y no se " +
+                        "envía ningún SMS mientras dure la suspensión, tampoco al crear o editar. WhatsApp sigue igual.")
+                .setPositiveButton(if (suspendidos) "Reanudar" else "Suspender/Anular") { _, _ ->
+                    if (suspendidos) SuspensionSms.reanudar(this) else SuspensionSms.suspender(this)
+                    actualizarSms()
+                    mostrarLista()
+                }
+                .setNegativeButton("Cancelar", null)
+                .show()
+        }
         findViewById<Button>(R.id.btnMostrarNotas).setOnClickListener { guardarColapsadas(emptySet()); mostrarLista() }
         findViewById<Button>(R.id.btnOcultarNotas).setOnClickListener {
             val todos = Repositorio.todos(this)
@@ -295,8 +314,15 @@ class MainActivity : Activity() {
         return super.onOptionsItemSelected(item)
     }
 
+    private fun actualizarSms() {
+        val suspendidos = SuspensionSms.activa(this)
+        findViewById<TextView>(R.id.avisoSms).visibility = if (suspendidos) View.VISIBLE else View.GONE
+        findViewById<Button>(R.id.btnSms).text = if (suspendidos) "Reanudar SMS" else "Suspender/Anular SMS"
+    }
+
     override fun onResume() {
         super.onResume()
+        actualizarSms()
         revisarPermisos()
         mostrarLista()
     }
@@ -496,7 +522,12 @@ class EditarActivity : Activity() {
             checks.forEach { it.isChecked = (it.tag as Int) in r.dias }
             cbAlarma.isChecked = r.alarma
             seleccion += r.contactos ?: Contactos.defaults(this).map { it.id }
-            if (r.sinSms) findViewById<TextView>(R.id.tvSmsAnulado).visibility = View.VISIBLE
+            if (r.sinSms || r.historialSms.isNotEmpty()) findViewById<TextView>(R.id.tvSmsAnulado).apply {
+                visibility = View.VISIBLE
+                text = (if (r.sinSms) "SMS anulado para este recordatorio (solo WhatsApp). Para reactivarlo, " +
+                    "desmarcá «Anular envío de SMS» al guardar.\n" else "") +
+                    (if (r.historialSms.isEmpty()) "" else "Historial de SMS:\n" + r.historialSms.joinToString("\n") { "• $it" })
+            }
             btnBorrar.visibility = View.VISIBLE
             btnBorrar.setOnClickListener { confirmarBorrado(r) { finish() } }
         } else {
@@ -562,7 +593,11 @@ class EditarActivity : Activity() {
             activo = true,
             alarma = cbAlarma.isChecked,
             contactos = seleccion.toMutableSet(),
-            sinSms = original?.sinSms ?: false
+            sinSms = (original?.sinSms ?: false) || SuspensionSms.activa(this),
+            historialSms = (original?.historialSms ?: mutableListOf()).toMutableList().apply {
+                if (original == null && SuspensionSms.activa(this@EditarActivity))
+                    add("Creado con SMS suspendidos/anulados el ${Formato.completo(System.currentTimeMillis())}")
+            }
         )
         Calculo.ajustarInicio(r, ahora)
         // Cancela las alarmas anteriores (incluida una posposición pendiente). La notificación vieja

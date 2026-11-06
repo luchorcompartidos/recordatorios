@@ -88,11 +88,48 @@ object Contactos {
     fun guardarPlantilla(ctx: Context, whatsapp: Boolean, texto: String) =
         prefs(ctx).edit().putString(if (whatsapp) "pl_w" else "pl_s", texto).apply()
 
+    // --- Borrado masivo del SMS de todos los contactos, con respaldo para restaurar ---
+    fun hayRespaldoSms(ctx: Context) = prefs(ctx).getString("sms_respaldo", null) != null
+    fun fechaRespaldoSms(ctx: Context) = prefs(ctx).getLong("sms_respaldo_fecha", 0)
+
+    /** Guarda qué contactos tenían SMS, se lo quita a todos y apaga el envío general. */
+    fun borrarSmsMasivo(ctx: Context) {
+        val lista = todos(ctx)
+        val respaldo = JSONObject()
+        lista.forEach { respaldo.put(it.id.toString(), it.modo.sms) }
+        prefs(ctx).edit().putString("sms_respaldo", respaldo.toString())
+            .putLong("sms_respaldo_fecha", System.currentTimeMillis()).apply()
+        lista.forEach { it.modo = sinSms(it.modo) }
+        guardar(ctx, lista)
+        guardarSmsHabilitado(ctx, false)
+        Registro.anotar(ctx, "SMS borrado de todos los contactos (respaldo guardado)")
+    }
+
+    /** Devuelve a cada contacto el SMS que tenía antes del borrado masivo. No toca WhatsApp ni el interruptor. */
+    fun restaurarSms(ctx: Context): Int {
+        val respaldo = JSONObject(prefs(ctx).getString("sms_respaldo", null) ?: return 0)
+        val lista = todos(ctx)
+        var cambios = 0
+        lista.forEach { c ->
+            if (!respaldo.has(c.id.toString())) return@forEach   // contacto agregado después del borrado
+            val nuevo = if (respaldo.getBoolean(c.id.toString())) conSms(c.modo) else sinSms(c.modo)
+            if (nuevo != c.modo) { c.modo = nuevo; cambios++ }
+        }
+        guardar(ctx, lista)
+        Registro.anotar(ctx, "Configuración de SMS de contactos restaurada ($cambios cambio/s)")
+        return cambios
+    }
+
+    private fun sinSms(m: ModoEnvio) = when (m) { ModoEnvio.AMBOS -> ModoEnvio.WHATSAPP; ModoEnvio.SMS -> ModoEnvio.NINGUNO; else -> m }
+    private fun conSms(m: ModoEnvio) = when (m) { ModoEnvio.WHATSAPP -> ModoEnvio.AMBOS; ModoEnvio.NINGUNO -> ModoEnvio.SMS; else -> m }
+
     fun exportar(ctx: Context): JSONObject = JSONObject()
         .put("lista", JSONArray(prefs(ctx).getString("l", "[]") ?: "[]"))
         .put("sms_on", smsHabilitado(ctx))
         .put("pl_w", plantilla(ctx, true))
         .put("pl_s", plantilla(ctx, false))
+        .put("sms_respaldo", prefs(ctx).getString("sms_respaldo", null))
+        .put("susp", prefs(ctx).getLong("susp", 0))
 
     fun importar(ctx: Context, o: JSONObject) {
         prefs(ctx).edit()
@@ -100,6 +137,8 @@ object Contactos {
             .putBoolean("sms_on", o.optBoolean("sms_on", true))
             .putString("pl_w", o.optString("pl_w", PLANTILLA_DEFECTO))
             .putString("pl_s", o.optString("pl_s", PLANTILLA_DEFECTO))
+            .putString("sms_respaldo", o.optString("sms_respaldo").ifBlank { null })
+            .putLong("susp", o.optLong("susp", 0))
             .apply()
     }
 }
@@ -131,7 +170,8 @@ object Envios {
         return Contactos.activos(ctx).filter { it.id in sel }
     }
 
-    fun usaSms(ctx: Context, r: Recordatorio, c: Contacto) = c.modo.sms && Contactos.smsHabilitado(ctx) && !r.sinSms
+    fun usaSms(ctx: Context, r: Recordatorio, c: Contacto) =
+        c.modo.sms && Contactos.smsHabilitado(ctx) && !r.sinSms && !SuspensionSms.activa(ctx)
 
     /** Avisos programados: 15 minutos antes y en el momento (también al sonar una posposición). */
     fun enviarProgramado(ctx: Context, r: Recordatorio, motivo: String, pospuesto: Boolean) {
@@ -549,7 +589,12 @@ fun Activity.confirmarAvisos(r: Recordatorio, motivo: String, alTerminar: () -> 
         caja.addView(cb)
         checks += k to cb
     }
-    val anular = CheckBox(c).apply { text = "Anular envío de SMS"; isChecked = r.sinSms }
+    val suspendidos = SuspensionSms.activa(this)
+    val anular = CheckBox(c).apply {
+        text = "Anular envío de SMS"
+        isChecked = r.sinSms || suspendidos
+        isEnabled = !suspendidos   // con la suspensión activa no se puede optar por SMS
+    }
     val leyenda = TextView(c).apply {
         text = "Se enviarán sólo por WhatsApp"
         setTypeface(typeface, Typeface.BOLD)
@@ -559,6 +604,10 @@ fun Activity.confirmarAvisos(r: Recordatorio, motivo: String, alTerminar: () -> 
     caja.addView(subtitulo(c, "Opciones"))
     caja.addView(anular)
     caja.addView(leyenda)
+    if (suspendidos) caja.addView(TextView(c).apply {
+        text = "Envíos SMS se encuentran SUSPENDIDOS/ANULADOS"
+        setTypeface(typeface, Typeface.BOLD)
+    })
     if (!Contactos.smsHabilitado(this)) caja.addView(TextView(c).apply { text = "(El envío de SMS está deshabilitado en Ajustes.)"; textSize = 12f })
 
     var decidido = false
@@ -593,6 +642,12 @@ fun Activity.confirmarAvisos(r: Recordatorio, motivo: String, alTerminar: () -> 
 /** Historial de cambios (ChangeLog). Se agrega una entrada con cada versión nueva. */
 object Cambios {
     private val versiones = listOf(
+        "1.8" to listOf(
+            "Lista principal: botón «Suspender/Anular SMS» con aviso fijo. Anula los SMS de todos los recordatorios " +
+                "vigentes, impide cualquier envío y deja la marca en el historial de cada uno.",
+            "«Reanudar SMS»: arranca de cero; los recordatorios afectados siguen sin SMS hasta reactivarlos a mano.",
+            "Ajustes: «Borrar SMS de todos los contactos» (con respaldo) y «Restaurar configuración de SMS»."
+        ),
         "1.7.1" to listOf(
             "Corrección: en la pantalla completa, «Enviar por WhatsApp», «Posponer» y «Editar» usaban un identificador " +
                 "equivocado («No se encontró el recordatorio»).",
@@ -652,5 +707,40 @@ object Cambios {
 
     fun texto(): String = versiones.joinToString("\n\n") { (v, items) ->
         "Versión $v\n" + items.joinToString("\n") { "• $it" }
+    }
+}
+
+/**
+ * Suspensión/anulación masiva de SMS desde la lista principal.
+ * Al suspender: todos los recordatorios vigentes quedan con "Anular envío de SMS" (sus SMS dejan de existir).
+ * Al reanudar: se arranca de cero; esos recordatorios siguen sin SMS hasta que el usuario los reactive.
+ */
+object SuspensionSms {
+    private fun prefs(ctx: Context) = ctx.getSharedPreferences("contactos", Context.MODE_PRIVATE)
+    fun activa(ctx: Context) = desde(ctx) > 0
+    fun desde(ctx: Context) = prefs(ctx).getLong("susp", 0)
+
+    fun suspender(ctx: Context) {
+        val ahora = System.currentTimeMillis()
+        prefs(ctx).edit().putLong("susp", ahora).apply()
+        val lista = Repositorio.todos(ctx)
+        lista.filter { it.activo || it.pospuestoHasta > 0 }.forEach {
+            it.sinSms = true
+            it.historialSms += "SMS suspendido/anulado masivamente el ${Formato.completo(ahora)}"
+        }
+        Repositorio.guardarTodos(ctx, lista)
+        Registro.anotar(ctx, "SMS SUSPENDIDOS/ANULADOS para todos los recordatorios")
+    }
+
+    fun reanudar(ctx: Context) {
+        val ahora = System.currentTimeMillis()
+        prefs(ctx).edit().putLong("susp", 0).apply()
+        val lista = Repositorio.todos(ctx)
+        lista.filter { it.historialSms.lastOrNull()?.startsWith("SMS suspendido") == true ||
+                       it.historialSms.lastOrNull()?.startsWith("Creado con SMS") == true }.forEach {
+            it.historialSms += "Envíos SMS reanudados el ${Formato.completo(ahora)} (sigue sin SMS hasta reactivarlo)"
+        }
+        Repositorio.guardarTodos(ctx, lista)
+        Registro.anotar(ctx, "SMS reanudados (los recordatorios vigentes siguen sin SMS)")
     }
 }

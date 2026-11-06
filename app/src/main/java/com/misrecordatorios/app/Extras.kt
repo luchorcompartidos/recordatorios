@@ -359,15 +359,48 @@ class AjustesActivity : Activity() {
         raiz.addView(contenedorContactos)
         armarContactos(contenedorContactos)
         boton("Agregar contacto") { editarContacto(contenedorContactos, -1) }
-        raiz.addView(Switch(this).apply {
+        val interruptorSms = Switch(this).apply {
             text = "Envío de SMS habilitado (para todos los contactos)"
             textSize = 16f
             isChecked = Contactos.smsHabilitado(this@AjustesActivity)
-            setOnCheckedChangeListener { _, v ->
-                Contactos.guardarSmsHabilitado(this@AjustesActivity, v)
-                aviso(if (v) "SMS habilitado: cada contacto usa su configuración" else "SMS deshabilitado para todos")
-            }
-        })
+        }
+        val alCambiarSms = android.widget.CompoundButton.OnCheckedChangeListener { _, v ->
+            Contactos.guardarSmsHabilitado(this, v)
+            aviso(if (v) "SMS habilitado: cada contacto usa su configuración" else "SMS deshabilitado para todos")
+        }
+        interruptorSms.setOnCheckedChangeListener(alCambiarSms)
+        raiz.addView(interruptorSms)
+        val estadoRespaldo = texto("")
+        fun refrescarRespaldo() {
+            estadoRespaldo.text = if (Contactos.hayRespaldoSms(this))
+                "Respaldo de SMS guardado el ${Formato.completo(Contactos.fechaRespaldoSms(this))}." else "Sin respaldo de SMS."
+            interruptorSms.setOnCheckedChangeListener(null)
+            interruptorSms.isChecked = Contactos.smsHabilitado(this)
+            interruptorSms.setOnCheckedChangeListener(alCambiarSms)
+            armarContactos(contenedorContactos)
+        }
+        boton("Borrar SMS de todos los contactos") {
+            AlertDialog.Builder(this, temaDialogo())
+                .setTitle("Borrar SMS de todos los contactos")
+                .setMessage("Se guarda un respaldo de qué contactos tenían SMS, se les quita a todos y se apaga el envío de SMS. " +
+                    "Si después lo volvés a habilitar, ningún contacto tendrá SMS hasta que lo restaures o lo actives en cada uno.")
+                .setPositiveButton("Borrar") { _, _ -> Contactos.borrarSmsMasivo(this); refrescarRespaldo(); aviso("SMS borrado de todos los contactos") }
+                .setNegativeButton("Cancelar", null)
+                .show()
+        }
+        boton("Restaurar configuración de SMS") {
+            if (!Contactos.hayRespaldoSms(this)) { aviso("No hay respaldo de SMS guardado"); return@boton }
+            AlertDialog.Builder(this, temaDialogo())
+                .setTitle("Restaurar configuración de SMS")
+                .setMessage("Cada contacto vuelve a tener SMS como antes del borrado masivo (no cambia WhatsApp). " +
+                    "El interruptor de envío de SMS no se modifica: al habilitarlo, solo los que tenían SMS lo recibirán.")
+                .setPositiveButton("Restaurar") { _, _ ->
+                    val n = Contactos.restaurarSms(this); refrescarRespaldo(); aviso("Restaurado ($n contacto/s modificado/s)")
+                }
+                .setNegativeButton("Cancelar", null)
+                .show()
+        }
+        refrescarRespaldo()
         boton("Texto del aviso por WhatsApp") { editarPlantilla(true) }
         boton("Texto del aviso por SMS") { editarPlantilla(false) }
 

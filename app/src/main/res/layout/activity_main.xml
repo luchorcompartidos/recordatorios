@@ -14,6 +14,27 @@
         android:textSize="15sp"
         android:visibility="gone" />
 
+    <TextView
+        android:id="@+id/avisoSms"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="#B3261E"
+        android:gravity="center"
+        android:padding="10dp"
+        android:text="Envíos SMS se encuentran SUSPENDIDOS/ANULADOS"
+        android:textColor="#FFFFFF"
+        android:textSize="15sp"
+        android:textStyle="bold"
+        android:visibility="gone" />
+
+    <Button
+        android:id="@+id/btnSms"
+        style="?android:attr/borderlessButtonStyle"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginHorizontal="12dp"
+        android:text="Suspender/Anular SMS" />
+
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
