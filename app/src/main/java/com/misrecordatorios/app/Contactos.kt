@@ -129,6 +129,7 @@ object Contactos {
         .put("pl_w", plantilla(ctx, true))
         .put("pl_s", plantilla(ctx, false))
         .put("sms_respaldo", prefs(ctx).getString("sms_respaldo", null))
+        .put("sms_respaldo_fecha", fechaRespaldoSms(ctx))
         .put("susp", prefs(ctx).getLong("susp", 0))
 
     fun importar(ctx: Context, o: JSONObject) {
@@ -138,6 +139,7 @@ object Contactos {
             .putString("pl_w", o.optString("pl_w", PLANTILLA_DEFECTO))
             .putString("pl_s", o.optString("pl_s", PLANTILLA_DEFECTO))
             .putString("sms_respaldo", o.optString("sms_respaldo").ifBlank { null })
+            .putLong("sms_respaldo_fecha", o.optLong("sms_respaldo_fecha", 0))
             .putLong("susp", o.optLong("susp", 0))
             .apply()
     }
@@ -478,10 +480,29 @@ fun Activity.editarContacto(contenedor: LinearLayout, indice: Int) {
         setSelection((actual?.modo ?: ModoEnvio.WHATSAPP).ordinal)
     }
     val porDefecto = CheckBox(c).apply { text = "Forma parte del grupo Default"; isChecked = actual?.porDefecto ?: false }
+    val resultadoWa = TextView(c).apply { textSize = 13f; visibility = View.GONE }
+    val validar = android.widget.Button(c).apply {
+        text = "Validar en WA y recuperar"
+        setOnClickListener {
+            if (checkSelfPermission(Manifest.permission.READ_CONTACTS) != PackageManager.PERMISSION_GRANTED) {
+                requestPermissions(arrayOf(Manifest.permission.READ_CONTACTS), 3)
+                aviso("Concedé el permiso de contactos y volvé a tocar «Validar en WA»")
+                return@setOnClickListener
+            }
+            val res = Agenda.buscar(this@editarContacto, numero.text.toString())
+            resultadoWa.visibility = View.VISIBLE
+            resultadoWa.text = when {
+                res == null -> "No se encontró ese número en la agenda del celular (WhatsApp tampoco tendrá nombre)."
+                res.tieneWhatsapp -> "✓ Tiene WhatsApp · nombre recuperado: ${res.nombre}"
+                else -> "Está en la agenda como «${res.nombre}», pero no figura en WhatsApp."
+            }
+            if (res != null && res.nombre.isNotBlank()) nombre.setText(res.nombre)
+        }
+    }
     val caja = LinearLayout(c).apply {
         orientation = LinearLayout.VERTICAL
         setPadding(m, m / 2, m, 0)
-        addView(nombre); addView(numero); addView(ayuda); addView(modo); addView(porDefecto)
+        addView(nombre); addView(numero); addView(validar); addView(resultadoWa); addView(ayuda); addView(modo); addView(porDefecto)
     }
     val b = AlertDialog.Builder(this, temaDialogo())
         .setTitle(if (actual == null) "Agregar contacto" else "Editar contacto")
@@ -499,9 +520,18 @@ fun Activity.editarContacto(contenedor: LinearLayout, indice: Int) {
         }
         .setNegativeButton("Cancelar", null)
     if (actual != null) b.setNeutralButton("Borrar") { _, _ ->
-        lista.removeAt(indice)
-        Contactos.guardar(this, lista)
-        armarContactos(contenedor)
+        AlertDialog.Builder(this, temaDialogo())
+            .setTitle("Borrar contacto")
+            .setMessage("¿Eliminar definitivamente a «${actual.etiqueta}» (${actual.numero})? " +
+                "Deja de recibir avisos de todos los recordatorios.")
+            .setPositiveButton("Eliminar") { _, _ ->
+                lista.removeAt(indice)
+                Contactos.guardar(this, lista)
+                armarContactos(contenedor)
+                aviso("Contacto eliminado")
+            }
+            .setNegativeButton("Cancelar", null)
+            .show()
     }
     b.show()
 }
@@ -642,6 +672,11 @@ fun Activity.confirmarAvisos(r: Recordatorio, motivo: String, alTerminar: () -> 
 /** Historial de cambios (ChangeLog). Se agrega una entrada con cada versión nueva. */
 object Cambios {
     private val versiones = listOf(
+        "1.9" to listOf(
+            "Contactos: botón «Validar en WA y recuperar» (busca el número en la agenda, trae el nombre e indica si tiene WhatsApp).",
+            "La copia de seguridad guarda también los últimos valores de «Personalizado» y la fecha del respaldo de SMS."
+        ),
+        "1.8.1" to listOf("Confirmación antes de eliminar un contacto."),
         "1.8" to listOf(
             "Lista principal: botón «Suspender/Anular SMS» con aviso fijo. Anula los SMS de todos los recordatorios " +
                 "vigentes, impide cualquier envío y deja la marca en el historial de cada uno.",
@@ -743,4 +778,40 @@ object SuspensionSms {
         Repositorio.guardarTodos(ctx, lista)
         Registro.anotar(ctx, "SMS reanudados (los recordatorios vigentes siguen sin SMS)")
     }
+}
+
+/**
+ * Búsqueda en la agenda del celular: WhatsApp muestra los nombres de la agenda y marca con su propia
+ * cuenta ("com.whatsapp") a los contactos que usan WhatsApp.
+ */
+object Agenda {
+    data class Resultado(val nombre: String, val tieneWhatsapp: Boolean)
+
+    fun buscar(ctx: Context, numero: String): Resultado? {
+        val digitos = numero.filter { it.isDigit() }
+        if (digitos.length < 6) return null
+        // Variantes del número: como se escribió, con "+", solo dígitos y los últimos 10 dígitos.
+        val variantes = listOf(numero.trim(), "+$digitos", digitos, digitos.takeLast(10)).distinct()
+        for (v in variantes) {
+            val uri = Uri.withAppendedPath(android.provider.ContactsContract.PhoneLookup.CONTENT_FILTER_URI, Uri.encode(v))
+            val encontrado = runCatching {
+                ctx.contentResolver.query(uri, arrayOf(android.provider.ContactsContract.PhoneLookup._ID,
+                    android.provider.ContactsContract.PhoneLookup.DISPLAY_NAME), null, null, null)?.use { c ->
+                    if (c.moveToFirst()) c.getLong(0) to (c.getString(1) ?: "") else null
+                }
+            }.getOrNull() ?: continue
+            val (idContacto, nombre) = encontrado
+            Registro.anotar(ctx, "Validación WA: «$nombre» encontrado en la agenda")
+            return Resultado(nombre, tieneWhatsapp(ctx, idContacto))
+        }
+        return null
+    }
+
+    private fun tieneWhatsapp(ctx: Context, idContacto: Long): Boolean = runCatching {
+        val rc = android.provider.ContactsContract.RawContacts.CONTENT_URI
+        ctx.contentResolver.query(rc, arrayOf(android.provider.ContactsContract.RawContacts._ID),
+            "${android.provider.ContactsContract.RawContacts.CONTACT_ID} = ? AND " +
+                "${android.provider.ContactsContract.RawContacts.ACCOUNT_TYPE} IN ('com.whatsapp', 'com.whatsapp.w4b')",
+            arrayOf(idContacto.toString()), null)?.use { it.count > 0 } ?: false
+    }.getOrDefault(false)
 }

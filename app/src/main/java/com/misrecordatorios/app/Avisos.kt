@@ -174,10 +174,18 @@ object Ajustes {
     fun exportar(ctx: Context): JSONObject = JSONObject()
         .put("alarma_defecto", alarmaPorDefecto(ctx))
         .put("posponer_rapido", posponerRapido(ctx))
+        .put("plazo_n", prefs(ctx).getInt("plazo_n", 1))
+        .put("plazo_u", prefs(ctx).getString("plazo_u", "m"))
+        .put("hora_min", prefs(ctx).getInt("hora_min", -1))
 
     fun importar(ctx: Context, o: JSONObject) {
         guardarAlarmaPorDefecto(ctx, o.optBoolean("alarma_defecto", false))
         guardarPosponerRapido(ctx, o.optString("posponer_rapido", Posposicion.POR_DEFECTO))
+        prefs(ctx).edit()
+            .putInt("plazo_n", o.optInt("plazo_n", 1))
+            .putString("plazo_u", o.optString("plazo_u", "m"))
+            .putInt("hora_min", o.optInt("hora_min", -1))
+            .apply()
     }
 }
 

@@ -16,7 +16,7 @@ android {
         minSdk = 34          // Android 14
         targetSdk = 35
         versionCode = numeroCompilacion
-        versionName = "1.8.$numeroCompilacion"
+        versionName = "1.9.$numeroCompilacion"
     }
 
     signingConfigs {
