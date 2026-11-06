@@ -31,13 +31,17 @@ data class Recordatorio(
     var diaMes: Int,                // para mensual: día del mes elegido
     var activo: Boolean,            // false = vencido (no se repite y ya sonó)
     var alarma: Boolean = false,    // true = suena como alarma con pantalla completa
-    var pospuestoHasta: Long = 0    // > 0 = hay una posposición pendiente (sobrevive a reinicios)
+    var pospuestoHasta: Long = 0,   // > 0 = hay una posposición pendiente (sobrevive a reinicios)
+    var contactos: MutableSet<Int>? = null,  // contactos a avisar; null = grupo Default
+    var sinSms: Boolean = false     // "Anular envío de SMS" para este recordatorio
 ) {
     fun aJson(): JSONObject = JSONObject()
         .put("id", id).put("titulo", titulo).put("nota", nota)
         .put("proxima", proxima).put("rep", repeticion.codigo)
         .put("dias", JSONArray(dias.toList())).put("diaMes", diaMes)
         .put("activo", activo).put("alarma", alarma).put("posp", pospuestoHasta)
+        .put("sinSms", sinSms)
+        .apply { contactos?.let { put("contactos", JSONArray(it.toList())) } }
 
     companion object {
         fun desdeJson(o: JSONObject): Recordatorio {
@@ -52,7 +56,9 @@ data class Recordatorio(
                 diaMes = o.optInt("diaMes", 1),
                 activo = o.optBoolean("activo", true),
                 alarma = o.optBoolean("alarma", false),
-                pospuestoHasta = o.optLong("posp", 0)
+                pospuestoHasta = o.optLong("posp", 0),
+                contactos = o.optJSONArray("contactos")?.let { a -> MutableList(a.length()) { a.getInt(it) }.toMutableSet() },
+                sinSms = o.optBoolean("sinSms", false)
             )
         }
     }

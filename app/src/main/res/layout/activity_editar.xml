@@ -80,6 +80,21 @@
             android:text="Sonar como alarma (pantalla completa, sonido hasta que respondas)" />
 
         <Button
+            android:id="@+id/btnContactos"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:text="Contactos a avisar" />
+
+        <TextView
+            android:id="@+id/tvSmsAnulado"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="SMS anulado para este recordatorio (solo WhatsApp)"
+            android:textColor="?android:attr/textColorSecondary"
+            android:visibility="gone" />
+
+        <Button
             android:id="@+id/btnGuardar"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"

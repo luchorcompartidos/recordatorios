@@ -21,13 +21,17 @@ object Programador {
     const val EXTRA_ID = "id"
     const val EXTRA_POSPUESTO = "pospuesto"
     const val EXTRA_CODIGO = "codigo"
+    const val EXTRA_PREVIO = "previo"
+    const val MINUTOS_PREVIO = 15L
 
-    private fun pendiente(ctx: Context, id: Int, pospuesto: Boolean): PendingIntent {
+    /** Tres alarmas posibles por recordatorio: la del momento, la de la posposición y el aviso previo a contactos. */
+    private fun pendiente(ctx: Context, id: Int, pospuesto: Boolean, previo: Boolean = false): PendingIntent {
         val i = Intent(ctx, AlarmaReceiver::class.java)
             .setAction("com.misrecordatorios.ALARMA")
             .putExtra(EXTRA_ID, id)
             .putExtra(EXTRA_POSPUESTO, pospuesto)
-        val codigo = id * 2 + if (pospuesto) 1 else 0
+            .putExtra(EXTRA_PREVIO, previo)
+        val codigo = id * 4 + if (previo) 2 else if (pospuesto) 1 else 0
         return PendingIntent.getBroadcast(ctx, codigo, i,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
     }
@@ -60,6 +64,11 @@ object Programador {
         cancelar(ctx, r.id, incluirPospuesto = false)
         if (!r.activo) return
         val modo = alarmaEn(ctx, r.proxima, pendiente(ctx, r.id, false), r.alarma)
+        // Aviso a contactos 15 minutos antes (solo si hay contactos y todavía falta más que eso).
+        val previo = r.proxima - MINUTOS_PREVIO * 60_000
+        if (previo > System.currentTimeMillis() && Envios.destinatarios(ctx, r).isNotEmpty()) {
+            alarmaEn(ctx, previo, pendiente(ctx, r.id, false, previo = true), false)
+        }
         Registro.anotar(ctx, "#${r.id} «${r.titulo}» programado para ${Formato.completo(r.proxima)} ($modo)")
     }
 
@@ -81,10 +90,10 @@ object Programador {
             return null
         }
         r!!; momento!!
-        Notificador.quitar(ctx, id)
         r.pospuestoHasta = momento
         Repositorio.guardar(ctx, r)
         val modo = alarmaEn(ctx, momento, pendiente(ctx, id, true), r.alarma)
+        Notificador.mostrarPospuesta(ctx, r, momento)
         Registro.anotar(ctx, "#$id pospuesto hasta ${Formato.completo(momento)} ($modo)")
         return momento
     }
@@ -92,6 +101,7 @@ object Programador {
     fun cancelar(ctx: Context, id: Int, incluirPospuesto: Boolean = true) {
         val am = ctx.getSystemService(AlarmManager::class.java)
         am.cancel(pendiente(ctx, id, false))
+        am.cancel(pendiente(ctx, id, false, previo = true))
         if (incluirPospuesto) am.cancel(pendiente(ctx, id, true))
     }
 
@@ -121,7 +131,7 @@ object Programador {
                     Repositorio.guardar(ctx, r)
                     if (avisarPerdidos) {
                         Notificador.mostrar(ctx, r, comoAlarma = false, pospuesta = true)
-                        Envios.alSonar(ctx, r, true)
+                        Envios.enviarProgramado(ctx, r, Envios.AHORA, true)
                     }
                 } else {
                     alarmaEn(ctx, r.pospuestoHasta, pendiente(ctx, r.id, true), r.alarma)
@@ -131,7 +141,7 @@ object Programador {
             if (r.proxima <= ahora) {
                 if (avisarPerdidos) {   // se perdió con el celular apagado
                     Notificador.mostrar(ctx, r, comoAlarma = false)
-                    Envios.alSonar(ctx, r, false)
+                    Envios.enviarProgramado(ctx, r, Envios.AHORA, false)
                 }
                 avanzar(ctx, r)
             } else {
@@ -175,6 +185,7 @@ object Notificador {
     private const val CANAL = "recordatorios"
     private const val CANAL_ALARMA = "alarmas_v1"
     private const val CANAL_MUDO = "alarmas_silenciadas_v1"
+    private const val CANAL_ESTADO = "pospuestos_v1"
     const val ACCION_HECHO = "com.misrecordatorios.HECHO"
     const val ACCION_POSPONER = "com.misrecordatorios.POSPONER"
     const val ACCION_CALLAR = "com.misrecordatorios.CALLAR"
@@ -198,7 +209,9 @@ object Notificador {
             enableVibration(false)
         }
         ctx.getSystemService(NotificationManager::class.java)
-            .createNotificationChannels(listOf(normal, alarma, mudo))
+            .createNotificationChannels(listOf(normal, alarma, mudo,
+                NotificationChannel(CANAL_ESTADO, "Pospuestos", NotificationManager.IMPORTANCE_LOW)
+                    .apply { description = "Recordatorios pospuestos que siguen en la bandeja" }))
     }
 
     /**
@@ -209,6 +222,33 @@ object Notificador {
         val nm = ctx.getSystemService(NotificationManager::class.java)
         nm.activeNotifications.filter { it.id == id }.forEach { nm.cancel(it.tag, it.id) }
         nm.cancel(id)
+    }
+
+    /** Al posponer: la notificación sigue en la bandeja, sin sonido, indicando hasta cuándo. */
+    fun mostrarPospuesta(ctx: Context, r: Recordatorio, momento: Long) {
+        crearCanales(ctx)
+        val nm = ctx.getSystemService(NotificationManager::class.java)
+        quitar(ctx, r.id)
+        val abrir = PendingIntent.getActivity(ctx, r.id,
+            Intent(ctx, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+        val elegir = PendingIntent.getActivity(ctx, r.id,
+            Intent(ctx, PosponerActivity::class.java).putExtra(Programador.EXTRA_ID, r.id)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_MULTIPLE_TASK),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+        val texto = "Pospuesto hasta el ${Formato.completo(momento)}" + if (r.nota.isBlank()) "" else "\n${r.nota}"
+        val n = Notification.Builder(ctx, CANAL_ESTADO)
+            .setSmallIcon(R.drawable.ic_notif)
+            .setContentTitle(r.titulo)
+            .setContentText(texto)
+            .setStyle(Notification.BigTextStyle().bigText(texto))
+            .setCategory(Notification.CATEGORY_REMINDER)
+            .setContentIntent(abrir)
+            .setAutoCancel(false)
+            .addAction(boton(ctx, "Hecho", accion(ctx, r.id, ACCION_HECHO)))
+            .addAction(boton(ctx, "Posponer…", elegir))
+            .build()
+        nm.notify("p${System.currentTimeMillis()}", r.id, n)
     }
 
     /** true si la notificación visible de ese recordatorio viene de una posposición. */
@@ -244,9 +284,8 @@ object Notificador {
         val nm = ctx.getSystemService(NotificationManager::class.java)
         // Si quedó una notificación anterior del mismo recordatorio, se quita para que la nueva
         // aparezca como nueva (con sonido, emergente y arriba) y no como una actualización silenciosa.
-        val etiquetaPrevia = nm.activeNotifications.firstOrNull { it.id == r.id }?.tag
-        if (!silenciada) quitar(ctx, r.id)
-        val etiqueta = if (silenciada && etiquetaPrevia != null) etiquetaPrevia else "n${System.currentTimeMillis()}"
+        quitar(ctx, r.id)   // una sola notificación por recordatorio; además corta un sonido en curso
+        val etiqueta = "n${System.currentTimeMillis()}"
         val elegir = PendingIntent.getActivity(ctx, r.id,
             Intent(ctx, PosponerActivity::class.java).putExtra(Programador.EXTRA_ID, r.id)
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_MULTIPLE_TASK),
@@ -255,7 +294,7 @@ object Notificador {
             Intent(ctx, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
         val base = r.nota.ifBlank { "Recordatorio de las " + Formato.hora(r.proxima) }
-        val texto = if (pospuesta) "Original vencido · $base" else base
+        val texto = if (pospuesta) "{\"Original Vencido\"}\n$base" else base
         val rapido = Ajustes.posponerRapido(ctx)
         val piRapido = if (rapido == Posposicion.PERSONALIZADO)
             PendingIntent.getActivity(ctx, r.id + 1_000_000,
@@ -276,7 +315,7 @@ object Notificador {
             .setStyle(Notification.BigTextStyle().bigText(texto))
             .setVisibility(Notification.VISIBILITY_PUBLIC)
             .setShowWhen(true)
-            .setAutoCancel(true)
+            .setAutoCancel(false)   // queda en la bandeja hasta tocar Hecho o deslizarla
             .addExtras(android.os.Bundle().apply { putBoolean("pospuesta", pospuesta) })
             .addAction(boton(ctx, "Hecho", accion(ctx, r.id, ACCION_HECHO)))
 
@@ -286,8 +325,9 @@ object Notificador {
             val pantalla = pantallaAlarma(ctx, r.id)
             b.setCategory(Notification.CATEGORY_ALARM)
                 .setContentIntent(pantalla)
-                .setFullScreenIntent(pantalla, true)
-                .setOnlyAlertOnce(silenciada)
+            // Silenciada: sin pantalla completa, para no volver a abrir la alarma.
+            if (!silenciada) b.setFullScreenIntent(pantalla, true)
+            b
                 .addAction(boton(ctx, "Posponer…", elegir))
             if (!silenciada) b.addAction(boton(ctx, "Callar", accion(ctx, r.id, ACCION_CALLAR)))
             else b.addAction(boton(ctx, Posposicion.textoBoton(rapido), piRapido))
@@ -327,7 +367,7 @@ object Formato {
             Repeticion.MENSUAL -> " · Mensual (día ${r.diaMes})"
         }
         return (if (r.activo) "" else "Vencido: ") + completo(r.proxima) + rep +
-            (if (r.alarma) " · Alarma" else "")
+            (if (r.alarma) " · Alarma" else "") + (if (r.sinSms) " · SMS anulado" else "")
     }
 }
 
@@ -336,13 +376,23 @@ class AlarmaReceiver : BroadcastReceiver() {
     override fun onReceive(ctx: Context, intent: Intent) {
         val r = Repositorio.obtener(ctx, intent.getIntExtra(Programador.EXTRA_ID, -1)) ?: return
         val pospuesto = intent.getBooleanExtra(Programador.EXTRA_POSPUESTO, false)
+        if (intent.getBooleanExtra(Programador.EXTRA_PREVIO, false)) {
+            val falta = r.proxima - System.currentTimeMillis()
+            if (!r.activo || falta <= 0 || falta > (Programador.MINUTOS_PREVIO + 1) * 60_000) {
+                Registro.anotar(ctx, "#${r.id} aviso previo ignorado (ya no corresponde)")
+                return
+            }
+            Registro.anotar(ctx, "#${r.id} aviso previo a contactos")
+            Envios.enviarProgramado(ctx, r, Envios.PREVIO, false)
+            return
+        }
         if (pospuesto) {
             if (r.pospuestoHasta == 0L) return   // la posposición se canceló (por ejemplo, al editar)
             r.pospuestoHasta = 0
             Repositorio.guardar(ctx, r)
             Registro.anotar(ctx, "#${r.id} sonó la posposición")
             Notificador.mostrar(ctx, r, pospuesta = true)
-            Envios.alSonar(ctx, r, true)
+            Envios.enviarProgramado(ctx, r, Envios.AHORA, true)
             return
         }
         // Ignora alarmas viejas (por ejemplo, si el recordatorio se editó).
@@ -352,7 +402,7 @@ class AlarmaReceiver : BroadcastReceiver() {
         }
         Registro.anotar(ctx, "#${r.id} sonó la alarma")
         Notificador.mostrar(ctx, r)
-        Envios.alSonar(ctx, r, false)
+        Envios.enviarProgramado(ctx, r, Envios.AHORA, false)
         Programador.avanzar(ctx, r)
     }
 }

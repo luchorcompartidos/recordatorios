@@ -7,6 +7,8 @@ import android.app.AlertDialog
 import android.app.DatePickerDialog
 import android.app.NotificationManager
 import android.app.TimePickerDialog
+import android.app.KeyguardManager
+import android.widget.ImageView
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
@@ -199,14 +201,25 @@ class AlarmaActivity : Activity() {
         findViewById<TextView>(R.id.alHora).text = Formato.hora(System.currentTimeMillis())
         findViewById<TextView>(R.id.alTitulo).text = r.titulo
         val pospuesta = Notificador.esPospuesta(this, id)
-        val nota = if (pospuesta) "Original vencido" + (if (r.nota.isBlank()) "" else "\n" + r.nota) else r.nota
+        val nota = if (pospuesta) "{\"Original Vencido\"}" + (if (r.nota.isBlank()) "" else "\n" + r.nota) else r.nota
         findViewById<TextView>(R.id.alNota).apply {
             text = nota
             visibility = if (nota.isBlank()) View.GONE else View.VISIBLE
         }
         findViewById<Button>(R.id.alWhatsapp).apply {
-            visibility = if (Contactos.activos(this@AlarmaActivity).any { it.modo.whatsapp }) View.VISIBLE else View.GONE
-            setOnClickListener { startActivity(Envios.intentWhatsapp(this@AlarmaActivity, id, pospuesta)) }
+            val wa = Envios.destinatarios(this@AlarmaActivity, r).filter { it.modo.whatsapp }
+            visibility = if (wa.isNotEmpty()) View.VISIBLE else View.GONE
+            setOnClickListener {
+                val abrir = { startActivity(Envios.intentWhatsapp(this@AlarmaActivity, id, Envios.AHORA, pospuesta, wa.map { it.id })) }
+                // Con el celular bloqueado, Android no deja abrir otra ventana: primero se pide desbloquear.
+                val km = getSystemService(KeyguardManager::class.java)
+                if (km.isKeyguardLocked) {
+                    km.requestDismissKeyguard(this@AlarmaActivity, object : KeyguardManager.KeyguardDismissCallback() {
+                        override fun onDismissSucceeded() { abrir() }
+                        override fun onDismissCancelled() { aviso("Desbloqueá el celular para enviar por WhatsApp") }
+                    })
+                } else abrir()
+            }
         }
         val callar = findViewById<Button>(R.id.alCallar)
         callar.isEnabled = true
@@ -247,6 +260,13 @@ class MainActivity : Activity() {
         super.onCreate(estado)
         setContentView(R.layout.activity_main)
         lista = findViewById(R.id.lista)
+        findViewById<Button>(R.id.btnMostrarNotas).setOnClickListener { guardarColapsadas(emptySet()); mostrarLista() }
+        findViewById<Button>(R.id.btnOcultarNotas).setOnClickListener {
+            val todos = Repositorio.todos(this)
+            guardarColapsadas(todos.filter { textoNota(it, it.pospuestoHasta > 0).isNotEmpty() }.map { it.id.toString() }.toSet())
+            expandidas.clear()
+            mostrarLista()
+        }
         aviso = findViewById(R.id.aviso)
         findViewById<Button>(R.id.btnNuevo).setOnClickListener {
             startActivity(Intent(this, EditarActivity::class.java))
@@ -325,24 +345,86 @@ class MainActivity : Activity() {
         val vencidos = todos.filter { !it.activo && it.pospuestoHasta == 0L }.sortedByDescending { it.proxima }
         if (proximos.isNotEmpty() || pospuestos.isNotEmpty()) agregarTitulo("Próximos")
         proximos.forEach { agregarItem(it) }
-        if (pospuestos.isNotEmpty()) { agregarTitulo("   Pospuestos"); pospuestos.forEach { agregarItem(it, pospuesto = true) } }
+        if (pospuestos.isNotEmpty()) { agregarTitulo("Pospuestos", sub = true); pospuestos.forEach { agregarItem(it, pospuesto = true) } }
         if (vencidos.isNotEmpty()) { agregarTitulo("Vencidos"); vencidos.forEach { agregarItem(it) } }
     }
 
-    private fun agregarTitulo(texto: String) {
+    private fun agregarTitulo(texto: String, sub: Boolean = false) {
         val v = layoutInflater.inflate(R.layout.item_titulo, lista, false) as TextView
         v.text = texto
+        if (sub) {
+            v.textSize = 13f
+            v.setPadding(v.paddingLeft * 3, v.paddingTop / 2, v.paddingRight, v.paddingBottom)
+        } else {
+            v.textSize = 19f
+        }
         lista.addView(v)
+    }
+
+    // Notas: colapsadas (se recuerda) y "Mostrar más" (mientras la pantalla está abierta).
+    private val expandidas = mutableSetOf<Int>()
+    private fun colapsadas(): MutableSet<String> =
+        getSharedPreferences("vista", MODE_PRIVATE).getStringSet("colapsadas", emptySet())!!.toMutableSet()
+    private fun guardarColapsadas(c: Set<String>) =
+        getSharedPreferences("vista", MODE_PRIVATE).edit().putStringSet("colapsadas", c).apply()
+
+    private fun textoNota(r: Recordatorio, pospuesto: Boolean): String {
+        val partes = mutableListOf<String>()
+        if (pospuesto) partes += "{\"Original Vencido\"}"
+        if (r.nota.isNotBlank()) partes += r.nota
+        return partes.joinToString("\n")
     }
 
     private fun agregarItem(r: Recordatorio, pospuesto: Boolean = false) {
         val v = layoutInflater.inflate(R.layout.item_recordatorio, lista, false)
         v.findViewById<TextView>(R.id.titulo).text =
-            if (pospuesto) r.titulo + " {\"Original Vencido\"}" else r.titulo
+            r.titulo
         v.findViewById<TextView>(R.id.detalle).text =
             if (pospuesto) "Pospuesto hasta el " + Formato.completo(r.pospuestoHasta) else Formato.detalle(r)
         if (pospuesto) v.setPadding(v.paddingLeft * 3, v.paddingTop, v.paddingRight, v.paddingBottom)
         else if (!r.activo) v.alpha = 0.55f
+        val nota = textoNota(r, pospuesto)
+        if (nota.isNotEmpty()) {
+            val clave = r.id.toString()
+            val colapsada = clave in colapsadas()
+            val tvNota = v.findViewById<TextView>(R.id.nota)
+            val tvMas = v.findViewById<TextView>(R.id.masNota)
+            val tvContiene = v.findViewById<TextView>(R.id.contieneNotas)
+            v.findViewById<ImageView>(R.id.colapsar).apply {
+                visibility = View.VISIBLE
+                setImageResource(if (colapsada) android.R.drawable.arrow_down_float else android.R.drawable.arrow_up_float)
+                contentDescription = if (colapsada) "Mostrar nota" else "Ocultar nota"
+                setOnClickListener {
+                    val c = colapsadas()
+                    if (colapsada) c -= clave else c += clave
+                    guardarColapsadas(c)
+                    mostrarLista()
+                }
+            }
+            if (colapsada) {
+                tvContiene.visibility = View.VISIBLE
+                tvContiene.setOnClickListener { guardarColapsadas(colapsadas() - clave); mostrarLista() }
+            } else {
+                tvNota.text = nota
+                tvNota.visibility = View.VISIBLE
+                val completa = r.id in expandidas
+                tvNota.maxLines = if (completa) Int.MAX_VALUE else 3
+                tvMas.setOnClickListener {
+                    if (completa) expandidas -= r.id else expandidas += r.id
+                    mostrarLista()
+                }
+                if (completa) {
+                    tvMas.text = "Mostrar menos"
+                    tvMas.visibility = View.VISIBLE
+                } else tvNota.post {
+                    val l = tvNota.layout ?: return@post
+                    if (l.lineCount > 3 || l.getEllipsisCount(l.lineCount - 1) > 0) {
+                        tvMas.text = "Mostrar más..."
+                        tvMas.visibility = View.VISIBLE
+                    }
+                }
+            }
+        }
         v.setOnClickListener {
             startActivity(Intent(this, EditarActivity::class.java).putExtra(Programador.EXTRA_ID, r.id))
         }
@@ -362,6 +444,13 @@ class EditarActivity : Activity() {
     private lateinit var spRep: Spinner
     private lateinit var filaDias: LinearLayout
     private lateinit var cbAlarma: CheckBox
+    private lateinit var btnContactos: Button
+    private val seleccion = mutableSetOf<Int>()
+
+    private fun actualizarContactos() {
+        val activos = Contactos.activos(this).map { it.id }.toSet()
+        btnContactos.text = "Contactos a avisar (${seleccion.count { it in activos }})"
+    }
     private val checks = mutableListOf<CheckBox>()
 
     override fun onCreate(estado: Bundle?) {
@@ -374,6 +463,7 @@ class EditarActivity : Activity() {
         spRep = findViewById(R.id.spRepeticion)
         filaDias = findViewById(R.id.filaDias)
         cbAlarma = findViewById(R.id.cbAlarma)
+        btnContactos = findViewById(R.id.btnContactos)
         val btnBorrar = findViewById<Button>(R.id.btnBorrar)
 
         listOf("L", "M", "X", "J", "V", "S", "D").forEachIndexed { i, letra ->
@@ -404,14 +494,19 @@ class EditarActivity : Activity() {
             spRep.setSelection(r.repeticion.ordinal)
             checks.forEach { it.isChecked = (it.tag as Int) in r.dias }
             cbAlarma.isChecked = r.alarma
+            seleccion += r.contactos ?: Contactos.defaults(this).map { it.id }
+            if (r.sinSms) findViewById<TextView>(R.id.tvSmsAnulado).visibility = View.VISIBLE
             btnBorrar.visibility = View.VISIBLE
             btnBorrar.setOnClickListener { confirmarBorrado(r) { finish() } }
         } else {
             title = "Nuevo recordatorio"
             cbAlarma.isChecked = Ajustes.alarmaPorDefecto(this)
+            seleccion += Contactos.defaults(this).map { it.id }
             fechaHora = ZonedDateTime.now().withSecond(0).withNano(0)
         }
         actualizarBotones()
+        actualizarContactos()
+        btnContactos.setOnClickListener { elegirContactos(seleccion) { actualizarContactos() } }
 
         btnFecha.setOnClickListener {
             DatePickerDialog(this, { _, a, m, d ->
@@ -464,23 +559,17 @@ class EditarActivity : Activity() {
             dias = if (rep == Repeticion.SEMANAL) dias else mutableSetOf(),
             diaMes = fechaHora.dayOfMonth,
             activo = true,
-            alarma = cbAlarma.isChecked
+            alarma = cbAlarma.isChecked,
+            contactos = seleccion.toMutableSet(),
+            sinSms = original?.sinSms ?: false
         )
         Calculo.ajustarInicio(r, ahora)
-        // Limpia lo anterior (alarma, posposición pendiente y notificación vieja) antes de reprogramar.
+        // Cancela las alarmas anteriores (incluida una posposición pendiente). La notificación vieja
+        // queda en la bandeja hasta que suene la nueva.
         Programador.cancelar(this, r.id)
-        Notificador.quitar(this, r.id)
         Repositorio.guardar(this, r)
         Programador.programar(this, r)
         aviso("Guardado para el " + Formato.completo(r.proxima))
-        val destinatarios = Contactos.resumen(this)
-        if (destinatarios == null) { finish(); return }
-        AlertDialog.Builder(this)
-            .setTitle("Aviso a contactos")
-            .setMessage("Cuando suene este recordatorio se avisará a:\n\n$destinatarios\n\n" +
-                "El SMS se envía solo; el WhatsApp queda listo para que lo envíes con un toque.")
-            .setPositiveButton("Entendido", null)
-            .setOnDismissListener { finish() }
-            .show()
+        confirmarAvisos(r, if (original == null) Envios.NUEVO else Envios.EDITADO) { finish() }
     }
 }

@@ -121,6 +121,7 @@ object Copia {
         .put("ultima_manual", ultimaManual(ctx))
         .put("datos", Repositorio.exportar(ctx))
         .put("ajustes", Ajustes.exportar(ctx))
+        .put("contactos", Contactos.exportar(ctx))
         .toString(1)
 
     /** Primera vez: crea la copia previa (si no existía) y la actual. */
@@ -154,6 +155,7 @@ object Copia {
         Programador.cancelarTodo(ctx)
         Repositorio.importar(ctx, obj.getJSONObject("datos"))
         obj.optJSONObject("ajustes")?.let { Ajustes.importar(ctx, it) }
+        obj.optJSONObject("contactos")?.let { Contactos.importar(ctx, it) }
         marcarLista(ctx)
         Programador.reprogramarTodos(ctx, avisarPerdidos = false)
         Registro.anotar(ctx, "Restaurado desde $nombre")
@@ -351,12 +353,23 @@ class AjustesActivity : Activity() {
         }
 
         seccion("AVISOS A CONTACTOS")
-        texto("Cuando suena un recordatorio se avisa a estos números. Tocá un contacto para editarlo o elegir el medio: " +
-            "SMS (se envía solo), WhatsApp (queda listo para enviar con un toque) o ambos.")
+        texto("Se avisa al crear, al editar, 15 minutos antes y en el momento de cada recordatorio. " +
+            "WhatsApp queda listo para enviar con un toque; el SMS se envía solo. Tocá un contacto para editarlo.")
         val contenedorContactos = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         raiz.addView(contenedorContactos)
         armarContactos(contenedorContactos)
         boton("Agregar contacto") { editarContacto(contenedorContactos, -1) }
+        raiz.addView(Switch(this).apply {
+            text = "Envío de SMS habilitado (para todos los contactos)"
+            textSize = 16f
+            isChecked = Contactos.smsHabilitado(this@AjustesActivity)
+            setOnCheckedChangeListener { _, v ->
+                Contactos.guardarSmsHabilitado(this@AjustesActivity, v)
+                aviso(if (v) "SMS habilitado: cada contacto usa su configuración" else "SMS deshabilitado para todos")
+            }
+        })
+        boton("Texto del aviso por WhatsApp") { editarPlantilla(true) }
+        boton("Texto del aviso por SMS") { editarPlantilla(false) }
 
         seccion("COPIA DE SEGURIDAD")
         estadoCopia = texto("")
