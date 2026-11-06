@@ -11,6 +11,8 @@ import android.content.Intent
 import android.graphics.drawable.Icon
 import android.media.AudioAttributes
 import android.media.RingtoneManager
+import org.json.JSONObject
+import java.time.LocalTime
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 
@@ -30,18 +32,35 @@ object Programador {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
     }
 
-    private fun alarmaEn(ctx: Context, momento: Long, pi: PendingIntent) {
+    /**
+     * Recordatorios con alarma sonora: modo "reloj despertador" (nunca se demora por ahorro de batería).
+     * El resto: alarma exacta que también funciona en reposo.
+     */
+    private fun alarmaEn(ctx: Context, momento: Long, pi: PendingIntent, despertador: Boolean): String {
         val am = ctx.getSystemService(AlarmManager::class.java)
-        if (am.canScheduleExactAlarms()) {
-            am.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, momento, pi)
-        } else {
-            am.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, momento, pi) // respaldo, menos preciso
+        return when {
+            despertador && am.canScheduleExactAlarms() -> {
+                val ver = PendingIntent.getActivity(ctx, 0, Intent(ctx, MainActivity::class.java),
+                    PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+                am.setAlarmClock(AlarmManager.AlarmClockInfo(momento, ver), pi)
+                "despertador"
+            }
+            am.canScheduleExactAlarms() -> {
+                am.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, momento, pi)
+                "exacta"
+            }
+            else -> {
+                am.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, momento, pi)
+                "aproximada (falta permiso de alarmas exactas)"
+            }
         }
     }
 
     fun programar(ctx: Context, r: Recordatorio) {
         cancelar(ctx, r.id, incluirPospuesto = false)
-        if (r.activo) alarmaEn(ctx, r.proxima, pendiente(ctx, r.id, false))
+        if (!r.activo) return
+        val modo = alarmaEn(ctx, r.proxima, pendiente(ctx, r.id, false), r.alarma)
+        Registro.anotar(ctx, "#${r.id} «${r.titulo}» programado para ${Formato.completo(r.proxima)} ($modo)")
     }
 
     /** Pospone según el código de [Posposicion]. Devuelve el momento elegido, o null si no se pudo. */
@@ -49,10 +68,11 @@ object Programador {
         val r = Repositorio.obtener(ctx, id) ?: return null
         val momento = Posposicion.momento(codigo, r) ?: return null
         if (momento <= System.currentTimeMillis()) return null
-        ctx.getSystemService(NotificationManager::class.java).cancel(id)
+        Notificador.quitar(ctx, id)
         r.pospuestoHasta = momento
         Repositorio.guardar(ctx, r)
-        alarmaEn(ctx, momento, pendiente(ctx, id, true))
+        val modo = alarmaEn(ctx, momento, pendiente(ctx, id, true), r.alarma)
+        Registro.anotar(ctx, "#$id pospuesto hasta ${Formato.completo(momento)} ($modo)")
         return momento
     }
 
@@ -62,10 +82,12 @@ object Programador {
         if (incluirPospuesto) am.cancel(pendiente(ctx, id, true))
     }
 
+    fun cancelarTodo(ctx: Context) = Repositorio.todos(ctx).forEach { cancelar(ctx, it.id); Notificador.quitar(ctx, it.id) }
+
     fun borrar(ctx: Context, id: Int) {
         cancelar(ctx, id)
         Repositorio.borrar(ctx, id)
-        ctx.getSystemService(NotificationManager::class.java).cancel(id)
+        Notificador.quitar(ctx, id)
     }
 
     /** Después de sonar: calcula la próxima vez o lo marca como vencido. */
@@ -76,22 +98,22 @@ object Programador {
         programar(ctx, r)
     }
 
-    /** Tras reiniciar el celular, cambiar la hora o actualizar la app. */
-    fun reprogramarTodos(ctx: Context) {
+    /** Tras reiniciar el celular, cambiar la hora, actualizar la app o restaurar una copia. */
+    fun reprogramarTodos(ctx: Context, avisarPerdidos: Boolean = true) {
         val ahora = System.currentTimeMillis()
         Repositorio.todos(ctx).forEach { r ->
             if (r.pospuestoHasta > 0) {
                 if (r.pospuestoHasta <= ahora) {
                     r.pospuestoHasta = 0
                     Repositorio.guardar(ctx, r)
-                    Notificador.mostrar(ctx, r, comoAlarma = false)
+                    if (avisarPerdidos) Notificador.mostrar(ctx, r, comoAlarma = false)
                 } else {
-                    alarmaEn(ctx, r.pospuestoHasta, pendiente(ctx, r.id, true))
+                    alarmaEn(ctx, r.pospuestoHasta, pendiente(ctx, r.id, true), r.alarma)
                 }
             }
             if (!r.activo) return@forEach
             if (r.proxima <= ahora) {
-                Notificador.mostrar(ctx, r, comoAlarma = false)   // se perdió mientras estaba apagado
+                if (avisarPerdidos) Notificador.mostrar(ctx, r, comoAlarma = false)   // se perdió con el celular apagado
                 avanzar(ctx, r)
             } else {
                 programar(ctx, r)
@@ -109,6 +131,25 @@ object Ajustes {
         prefs(ctx).getString("posponer_rapido", Posposicion.POR_DEFECTO) ?: Posposicion.POR_DEFECTO
     fun guardarPosponerRapido(ctx: Context, codigo: String) =
         prefs(ctx).edit().putString("posponer_rapido", codigo).apply()
+
+    // Últimos valores usados en "Personalizado".
+    fun ultimoPlazo(ctx: Context): Pair<Int, String> =
+        prefs(ctx).getInt("plazo_n", 1) to (prefs(ctx).getString("plazo_u", "m") ?: "m")
+    fun guardarUltimoPlazo(ctx: Context, n: Int, unidad: String) =
+        prefs(ctx).edit().putInt("plazo_n", n).putString("plazo_u", unidad).apply()
+    fun ultimaHora(ctx: Context): LocalTime? =
+        prefs(ctx).getInt("hora_min", -1).takeIf { it >= 0 }?.let { LocalTime.of(it / 60, it % 60) }
+    fun guardarUltimaHora(ctx: Context, t: LocalTime) =
+        prefs(ctx).edit().putInt("hora_min", t.hour * 60 + t.minute).apply()
+
+    fun exportar(ctx: Context): JSONObject = JSONObject()
+        .put("alarma_defecto", alarmaPorDefecto(ctx))
+        .put("posponer_rapido", posponerRapido(ctx))
+
+    fun importar(ctx: Context, o: JSONObject) {
+        guardarAlarmaPorDefecto(ctx, o.optBoolean("alarma_defecto", false))
+        guardarPosponerRapido(ctx, o.optString("posponer_rapido", Posposicion.POR_DEFECTO))
+    }
 }
 
 object Notificador {
@@ -141,6 +182,16 @@ object Notificador {
             .createNotificationChannels(listOf(normal, alarma, mudo))
     }
 
+    /**
+     * Quita las notificaciones de un recordatorio. Cada aviso usa una etiqueta propia, así un aviso
+     * nuevo nunca queda "pegado" a uno anterior (por ejemplo, uno pospuesto con el reloj de Android).
+     */
+    fun quitar(ctx: Context, id: Int) {
+        val nm = ctx.getSystemService(NotificationManager::class.java)
+        nm.activeNotifications.filter { it.id == id }.forEach { nm.cancel(it.tag, it.id) }
+        nm.cancel(id)
+    }
+
     /** Deja la alarma en la bandeja y en pantalla, pero sin sonido. */
     fun silenciar(ctx: Context, id: Int) {
         val nm = ctx.getSystemService(NotificationManager::class.java)
@@ -169,7 +220,9 @@ object Notificador {
         val nm = ctx.getSystemService(NotificationManager::class.java)
         // Si quedó una notificación anterior del mismo recordatorio, se quita para que la nueva
         // aparezca como nueva (con sonido, emergente y arriba) y no como una actualización silenciosa.
-        if (!silenciada) nm.cancel(r.id)
+        val etiquetaPrevia = nm.activeNotifications.firstOrNull { it.id == r.id }?.tag
+        if (!silenciada) quitar(ctx, r.id)
+        val etiqueta = if (silenciada && etiquetaPrevia != null) etiquetaPrevia else "n${System.currentTimeMillis()}"
         val elegir = PendingIntent.getActivity(ctx, r.id,
             Intent(ctx, PosponerActivity::class.java).putExtra(Programador.EXTRA_ID, r.id)
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_MULTIPLE_TASK),
@@ -179,6 +232,13 @@ object Notificador {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
         val texto = r.nota.ifBlank { "Recordatorio de las " + Formato.hora(r.proxima) }
         val rapido = Ajustes.posponerRapido(ctx)
+        val piRapido = if (rapido == Posposicion.PERSONALIZADO)
+            PendingIntent.getActivity(ctx, r.id + 1_000_000,
+                Intent(ctx, PosponerActivity::class.java).putExtra(Programador.EXTRA_ID, r.id)
+                    .putExtra(EXTRA_PERSONALIZADO, true)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_MULTIPLE_TASK),
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+        else accion(ctx, r.id, ACCION_POSPONER, rapido)
         val canal = when {
             !comoAlarma -> CANAL
             silenciada -> CANAL_MUDO
@@ -204,18 +264,21 @@ object Notificador {
                 .setOnlyAlertOnce(silenciada)
                 .addAction(boton(ctx, "Posponer…", elegir))
             if (!silenciada) b.addAction(boton(ctx, "Callar", accion(ctx, r.id, ACCION_CALLAR)))
-            else b.addAction(boton(ctx, Posposicion.textoBoton(rapido), accion(ctx, r.id, ACCION_POSPONER, rapido)))
+            else b.addAction(boton(ctx, Posposicion.textoBoton(rapido), piRapido))
         } else {
             b.setCategory(Notification.CATEGORY_REMINDER)
                 .setWhen(System.currentTimeMillis())
                 .setContentIntent(abrir)
-                .addAction(boton(ctx, Posposicion.textoBoton(rapido), accion(ctx, r.id, ACCION_POSPONER, rapido)))
+                .addAction(boton(ctx, Posposicion.textoBoton(rapido), piRapido))
                 .addAction(boton(ctx, "Posponer…", elegir))
         }
         val n = b.build()
         // Sonido en bucle hasta que se toque Hecho, Posponer o Callar (o se abra la bandeja).
         if (comoAlarma && !silenciada) n.flags = n.flags or Notification.FLAG_INSISTENT
-        nm.notify(r.id, n)
+        nm.notify(etiqueta, r.id, n)
+        if (!silenciada) Registro.anotar(ctx, "#${r.id} notificación mostrada (" +
+            (if (comoAlarma) "alarma" else "común") + ", notificaciones " +
+            (if (nm.areNotificationsEnabled()) "activadas" else "DESACTIVADAS") + ")")
     }
 }
 
@@ -251,11 +314,16 @@ class AlarmaReceiver : BroadcastReceiver() {
             if (r.pospuestoHasta == 0L) return   // la posposición se canceló (por ejemplo, al editar)
             r.pospuestoHasta = 0
             Repositorio.guardar(ctx, r)
+            Registro.anotar(ctx, "#${r.id} sonó la posposición")
             Notificador.mostrar(ctx, r)
             return
         }
         // Ignora alarmas viejas (por ejemplo, si el recordatorio se editó).
-        if (!r.activo || r.proxima > System.currentTimeMillis() + 60_000) return
+        if (!r.activo || r.proxima > System.currentTimeMillis() + 60_000) {
+            Registro.anotar(ctx, "#${r.id} alarma ignorada (activo=${r.activo}, próxima=${Formato.completo(r.proxima)})")
+            return
+        }
+        Registro.anotar(ctx, "#${r.id} sonó la alarma")
         Notificador.mostrar(ctx, r)
         Programador.avanzar(ctx, r)
     }
@@ -270,7 +338,7 @@ class AccionReceiver : BroadcastReceiver() {
             Notificador.ACCION_POSPONER ->
                 Programador.posponer(ctx, id,
                     intent.getStringExtra(Programador.EXTRA_CODIGO) ?: Posposicion.POR_DEFECTO)
-            else -> ctx.getSystemService(NotificationManager::class.java).cancel(id)
+            else -> Notificador.quitar(ctx, id)
         }
     }
 }

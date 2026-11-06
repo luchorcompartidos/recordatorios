@@ -79,7 +79,7 @@ fun Activity.elegirPosponer(id: Int, alCerrar: (Boolean) -> Unit) {
         .show()
 }
 
-private fun Activity.elegirPersonalizado(id: Int, alCerrar: (Boolean) -> Unit) {
+fun Activity.elegirPersonalizado(id: Int, alCerrar: (Boolean) -> Unit) {
     var sigue = false
     AlertDialog.Builder(this, temaDialogo())
         .setTitle("Personalizado")
@@ -97,15 +97,13 @@ private fun Activity.elegirFechaHora(id: Int, alCerrar: (Boolean) -> Unit) {
     var fechaElegida = false
     val dp = DatePickerDialog(this, temaDialogo(), { _, a, m, d ->
         fechaElegida = true
-        var horaElegida = false
-        val tp = TimePickerDialog(this, temaDialogo(), { _, h, min ->
-            horaElegida = true
-            val ms = ZonedDateTime.of(LocalDate.of(a, m + 1, d), LocalTime.of(h, min), ahora.zone)
-                .toInstant().toEpochMilli()
+        // La hora arranca en la última usada en "Personalizado" (o en la actual).
+        val inicial = Ajustes.ultimaHora(this) ?: ahora.toLocalTime()
+        elegirHora(inicial, alCancelar = { alCerrar(false) }) { t ->
+            Ajustes.guardarUltimaHora(this, t)
+            val ms = ZonedDateTime.of(LocalDate.of(a, m + 1, d), t, ahora.zone).toInstant().toEpochMilli()
             alCerrar(aplicarPosponer(id, "t:$ms"))
-        }, ahora.hour, ahora.minute, true)
-        tp.setOnDismissListener { if (!horaElegida) alCerrar(false) }
-        tp.show()
+        }
     }, ahora.year, ahora.monthValue - 1, ahora.dayOfMonth)
     dp.datePicker.minDate = System.currentTimeMillis() - 1000
     dp.setOnDismissListener { if (!fechaElegida) alCerrar(false) }
@@ -117,13 +115,15 @@ private fun Activity.elegirPlazo(id: Int, alCerrar: (Boolean) -> Unit) {
     val margen = (20 * resources.displayMetrics.density).toInt()
     val unidades = listOf("Minutos" to "m", "Horas" to "h", "Días" to "d",
         "Semanas" to "w", "Meses" to "M", "Años" to "y")
+    val (ultimoN, ultimaU) = Ajustes.ultimoPlazo(this)
     val numero = EditText(c).apply {
         inputType = InputType.TYPE_CLASS_NUMBER
-        setText("1")
+        setText(ultimoN.toString())
         setSelectAllOnFocus(true)
     }
     val unidad = Spinner(c).apply {
         adapter = ArrayAdapter(c, android.R.layout.simple_spinner_dropdown_item, unidades.map { it.first })
+        setSelection(unidades.indexOfFirst { it.second == ultimaU }.coerceAtLeast(0))
     }
     val caja = LinearLayout(c).apply {
         orientation = LinearLayout.HORIZONTAL
@@ -142,7 +142,9 @@ private fun Activity.elegirPlazo(id: Int, alCerrar: (Boolean) -> Unit) {
                 Toast.makeText(this, "Ingresá un número entre 1 y 10000", Toast.LENGTH_LONG).show()
                 alCerrar(false)
             } else {
-                alCerrar(aplicarPosponer(id, "${unidades[unidad.selectedItemPosition].second}:$n"))
+                val u = unidades[unidad.selectedItemPosition].second
+                Ajustes.guardarUltimoPlazo(this, n, u)
+                alCerrar(aplicarPosponer(id, "$u:$n"))
             }
         }
         .setNegativeButton("Cancelar", null)
@@ -150,11 +152,15 @@ private fun Activity.elegirPlazo(id: Int, alCerrar: (Boolean) -> Unit) {
         .show()
 }
 
-/** Ventanita que se abre desde "Posponer…" en la notificación. */
+const val EXTRA_PERSONALIZADO = "personalizado"
+
+/** Ventanita que se abre desde "Posponer…" (o "Posponer personalizado…") en la notificación. */
 class PosponerActivity : Activity() {
     override fun onCreate(estado: Bundle?) {
         super.onCreate(estado)
-        elegirPosponer(intent.getIntExtra(Programador.EXTRA_ID, -1)) { finish() }
+        val id = intent.getIntExtra(Programador.EXTRA_ID, -1)
+        if (intent.getBooleanExtra(EXTRA_PERSONALIZADO, false)) elegirPersonalizado(id) { finish() }
+        else elegirPosponer(id) { finish() }
     }
 }
 
@@ -194,13 +200,16 @@ class AlarmaActivity : Activity() {
             callar.text = "Silenciada"
         }
         findViewById<Button>(R.id.alHecho).setOnClickListener {
-            getSystemService(NotificationManager::class.java).cancel(id)
+            Notificador.quitar(this, id)
             finish()
         }
         val rapido = Ajustes.posponerRapido(this)
         findViewById<Button>(R.id.alPosponer5).apply {
             text = Posposicion.textoBoton(rapido)
-            setOnClickListener { if (aplicarPosponer(id, rapido)) finish() }
+            setOnClickListener {
+                if (rapido == Posposicion.PERSONALIZADO) elegirPersonalizado(id) { pospuesto -> if (pospuesto) finish() }
+                else if (aplicarPosponer(id, rapido)) finish()
+            }
         }
         findViewById<Button>(R.id.alPosponerOtro).setOnClickListener {
             elegirPosponer(id) { pospuesto -> if (pospuesto) finish() }
@@ -209,57 +218,6 @@ class AlarmaActivity : Activity() {
             Notificador.silenciar(this, id)   // la notificación queda en la bandeja, sin sonido
             finish()
         }
-    }
-}
-
-/** Ajustes generales. */
-class AjustesActivity : Activity() {
-    override fun onCreate(estado: Bundle?) {
-        super.onCreate(estado)
-        title = "Ajustes"
-        val margen = (16 * resources.displayMetrics.density).toInt()
-        val sw = Switch(this).apply {
-            text = "Crear los recordatorios nuevos con alarma sonora"
-            textSize = 16f
-            isChecked = Ajustes.alarmaPorDefecto(this@AjustesActivity)
-            setOnCheckedChangeListener { _, v -> Ajustes.guardarAlarmaPorDefecto(this@AjustesActivity, v) }
-        }
-        val ayuda = TextView(this).apply {
-            text = "Solo define cómo aparece marcada la opción al crear un recordatorio. " +
-                "Siempre se puede cambiar en cada uno."
-            setPadding(0, margen / 2, 0, 0)
-        }
-        val tituloRapido = TextView(this).apply {
-            text = "Botón rápido de Posponer en las notificaciones"
-            textSize = 16f
-            setPadding(0, margen * 2, 0, margen / 2)
-        }
-        val btnRapido = Button(this)
-        fun refrescar() { btnRapido.text = Posposicion.texto(Ajustes.posponerRapido(this)) }
-        refrescar()
-        btnRapido.setOnClickListener {
-            val ops = Posposicion.OPCIONES
-            val actual = ops.indexOfFirst { it.codigo == Ajustes.posponerRapido(this) }
-            AlertDialog.Builder(this, temaDialogo())
-                .setTitle("Posponer rápido")
-                .setSingleChoiceItems(ops.map { it.texto }.toTypedArray(), actual) { d, i ->
-                    Ajustes.guardarPosponerRapido(this, ops[i].codigo)
-                    refrescar()
-                    d.dismiss()
-                }
-                .setNegativeButton("Cancelar", null)
-                .show()
-        }
-        setContentView(ScrollView(this).apply {
-            addView(LinearLayout(this@AjustesActivity).apply {
-                orientation = LinearLayout.VERTICAL
-                setPadding(margen, margen, margen, margen)
-                addView(sw)
-                addView(ayuda)
-                addView(tituloRapido)
-                addView(btnRapido)
-            })
-        })
     }
 }
 
@@ -280,6 +238,13 @@ class MainActivity : Activity() {
         if (checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
             requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 1)
         }
+        if (estado == null) ofrecerCarpetaInicial()
+    }
+
+    @Deprecated("API de plataforma")
+    override fun onActivityResult(codigo: Int, resultado: Int, datos: Intent?) {
+        @Suppress("DEPRECATION") super.onActivityResult(codigo, resultado, datos)
+        if (codigo == PEDIDO_CARPETA && resultado == RESULT_OK) datos?.data?.let { carpetaElegida(it) { mostrarLista() } }
     }
 
     override fun onCreateOptionsMenu(menu: Menu): Boolean {
@@ -409,6 +374,10 @@ class EditarActivity : Activity() {
             etTitulo.setText(r.titulo)
             etNota.setText(r.nota)
             fechaHora = Calculo.zdt(r.proxima)
+            // Si es un vencido de un día anterior, la fecha arranca en hoy.
+            if (!r.activo && fechaHora.toLocalDate().isBefore(LocalDate.now())) {
+                fechaHora = ZonedDateTime.of(LocalDate.now(), fechaHora.toLocalTime(), fechaHora.zone)
+            }
             spRep.setSelection(r.repeticion.ordinal)
             checks.forEach { it.isChecked = (it.tag as Int) in r.dias }
             cbAlarma.isChecked = r.alarma
@@ -428,11 +397,11 @@ class EditarActivity : Activity() {
             }, fechaHora.year, fechaHora.monthValue - 1, fechaHora.dayOfMonth).show()
         }
         btnHora.setOnClickListener {
-            val ahora = ZonedDateTime.now()   // el selector arranca en la hora actual
-            TimePickerDialog(this, { _, h, min ->
-                fechaHora = fechaHora.withHour(h).withMinute(min).withSecond(0).withNano(0)
+            // El selector arranca en la hora actual.
+            elegirHora(LocalTime.now().withSecond(0).withNano(0)) { t ->
+                fechaHora = ZonedDateTime.of(fechaHora.toLocalDate(), t, fechaHora.zone)
                 actualizarBotones()
-            }, ahora.hour, ahora.minute, true).show()
+            }
         }
         findViewById<Button>(R.id.btnGuardar).setOnClickListener { guardar() }
     }
@@ -477,7 +446,7 @@ class EditarActivity : Activity() {
         Calculo.ajustarInicio(r, ahora)
         // Limpia lo anterior (alarma, posposición pendiente y notificación vieja) antes de reprogramar.
         Programador.cancelar(this, r.id)
-        getSystemService(NotificationManager::class.java).cancel(r.id)
+        Notificador.quitar(this, r.id)
         Repositorio.guardar(this, r)
         Programador.programar(this, r)
         aviso("Guardado para el " + Formato.completo(r.proxima))

@@ -77,6 +77,19 @@ object Repositorio {
         val arr = JSONArray()
         lista.forEach { arr.put(it.aJson()) }
         prefs(ctx).edit().putString(CLAVE, arr.toString()).commit()
+        Copia.automatica(ctx)   // mantiene sincronizada la copia de seguridad actual
+    }
+
+    @Synchronized
+    fun exportar(ctx: Context): JSONObject = JSONObject()
+        .put("recordatorios", JSONArray(prefs(ctx).getString(CLAVE, "[]") ?: "[]"))
+        .put("ultimo_id", prefs(ctx).getInt(CLAVE_ID, 0))
+
+    @Synchronized
+    fun importar(ctx: Context, obj: JSONObject) {
+        val arr = obj.optJSONArray("recordatorios") ?: JSONArray()
+        val ultimo = maxOf(obj.optInt("ultimo_id", 0), prefs(ctx).getInt(CLAVE_ID, 0))
+        prefs(ctx).edit().putString(CLAVE, arr.toString()).putInt(CLAVE_ID, ultimo).commit()
     }
 
     fun obtener(ctx: Context, id: Int) = todos(ctx).firstOrNull { it.id == id }
@@ -119,9 +132,14 @@ object Posposicion {
             OpcionPosponer("y:1", "1 año")
         )
 
-    fun texto(codigo: String) = OPCIONES.firstOrNull { it.codigo == codigo }?.texto ?: "10 minutos"
+    const val PERSONALIZADO = "personalizado"
 
-    /** Texto para un botón: "Posponer 10 minutos", "Posponer mañana a la misma hora". */
+    /** Opciones elegibles como botón rápido: el set completo más "Personalizado…". */
+    val OPCIONES_RAPIDO = OPCIONES + OpcionPosponer(PERSONALIZADO, "Personalizado…")
+
+    fun texto(codigo: String) = OPCIONES_RAPIDO.firstOrNull { it.codigo == codigo }?.texto ?: "10 minutos"
+
+    /** Texto para un botón: "Posponer 10 minutos", "Posponer personalizado…". */
     fun textoBoton(codigo: String) = "Posponer " + texto(codigo).replaceFirstChar { it.lowercase() }
 
     fun momento(codigo: String, r: Recordatorio, ahora: ZonedDateTime = ZonedDateTime.now()): Long? {
