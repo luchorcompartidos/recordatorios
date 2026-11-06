@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Tema del sistema: toma los colores del celular y el modo claro/oscuro. -->
+    <style name="Tema" parent="android:Theme.DeviceDefault.DayNight" />
+</resources>
