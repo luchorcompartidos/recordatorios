@@ -47,10 +47,9 @@
 
         <activity
             android:name=".EnviarWhatsappActivity"
-            android:excludeFromRecents="true"
             android:exported="false"
-            android:taskAffinity=""
-            android:theme="@style/TemaTransparente" />
+            android:launchMode="singleTask"
+            android:taskAffinity="com.misrecordatorios.whatsapp" />
 
         <activity
             android:name=".AjustesActivity"

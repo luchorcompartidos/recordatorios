@@ -3,6 +3,9 @@ package com.misrecordatorios.app
 import android.Manifest
 import android.app.Activity
 import android.app.AlertDialog
+import android.app.KeyguardManager
+import android.os.Bundle
+import android.widget.Button
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -176,51 +179,193 @@ object Envios {
             .putExtra(EXTRA_IDS, ids.toIntArray())
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
 
-    fun abrirWhatsapp(act: Activity, c: Contacto, texto: String) {
+    private val PAQUETES = listOf("com.whatsapp", "com.whatsapp.w4b", null)   // WhatsApp, WhatsApp Business, cualquiera
+
+    /** Abre el chat del contacto con el mensaje ya escrito. */
+    fun abrirWhatsapp(act: Activity, c: Contacto, texto: String): Boolean {
         val uri = Uri.parse("https://wa.me/${c.numeroWhatsapp()}?text=" + Uri.encode(texto))
-        runCatching { act.startActivity(Intent(Intent.ACTION_VIEW, uri)) }
+        for (paquete in PAQUETES) {
+            val ok = runCatching { act.startActivity(Intent(Intent.ACTION_VIEW, uri).setPackage(paquete)) }.isSuccess
+            if (ok) { Registro.anotar(act, "WhatsApp abierto para ${c.etiqueta}"); return true }
+        }
+        act.aviso("No se pudo abrir WhatsApp")
+        return false
+    }
+
+    /** Comparte el mensaje con WhatsApp: ahí se eligen varios chats y se envía a todos de una vez. */
+    fun compartirWhatsapp(act: Activity, texto: String) {
+        val base = Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, texto)
+        for (paquete in listOf("com.whatsapp", "com.whatsapp.w4b")) {
+            if (runCatching { act.startActivity(Intent(base).setPackage(paquete)) }.isSuccess) return
+        }
+        runCatching { act.startActivity(Intent.createChooser(base, "Compartir con")) }
             .onFailure { act.aviso("No se pudo abrir WhatsApp") }
     }
 }
 
-/** Lista de contactos de WhatsApp: cada toque abre WhatsApp con el mensaje escrito. */
+/**
+ * Pantalla de envío por WhatsApp: casillas por contacto, envío "uno por uno" que se retoma al volver
+ * (desde Recientes o desde la notificación de progreso) y opción de elegir varios chats dentro de WhatsApp.
+ */
 class EnviarWhatsappActivity : Activity() {
+    private var r: Recordatorio? = null
+    private var motivo = Envios.AHORA
+    private var pospuesto = false
+    private var contactos = listOf<Contacto>()
+    private val marcados = mutableSetOf<Int>()
     private val enviados = mutableSetOf<Int>()
-    private var dialogo: AlertDialog? = null
-    private var abriendo = false
+    private var enCola = false
+    private lateinit var raiz: LinearLayout
+
+    override fun onCreate(estado: Bundle?) {
+        super.onCreate(estado)
+        setShowWhenLocked(true)
+        title = "Enviar por WhatsApp"
+        raiz = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            val m = (16 * resources.displayMetrics.density).toInt()
+            setPadding(m, m, m, m)
+        }
+        setContentView(ScrollView(this).apply { addView(raiz) })
+        cargar(intent, nuevo = estado == null)
+        estado?.let {
+            it.getIntArray("marcados")?.let { a -> marcados.clear(); marcados += a.toList() }
+            it.getIntArray("enviados")?.let { a -> enviados += a.toList() }
+            enCola = it.getBoolean("enCola")
+        }
+        Registro.anotar(this, "Pantalla de envío por WhatsApp abierta")
+    }
+
+    override fun onNewIntent(i: Intent) {
+        super.onNewIntent(i)
+        if (i.getBooleanExtra(EXTRA_CONTINUAR, false)) return   // volver desde la notificación: se conserva el progreso
+        setIntent(i)
+        cargar(i, nuevo = true)
+    }
 
     override fun onResume() {
         super.onResume()
-        abriendo = false
-        mostrar()
+        armar()
     }
 
-    override fun onPause() {
-        super.onPause()
-        dialogo?.setOnDismissListener(null)
-        dialogo?.dismiss()
+    override fun onSaveInstanceState(estado: Bundle) {
+        super.onSaveInstanceState(estado)
+        estado.putIntArray("marcados", marcados.toIntArray())
+        estado.putIntArray("enviados", enviados.toIntArray())
+        estado.putBoolean("enCola", enCola)
     }
 
-    private fun mostrar() {
-        val r = Repositorio.obtener(this, intent.getIntExtra(Programador.EXTRA_ID, -1)) ?: run { finish(); return }
-        val pospuesto = intent.getBooleanExtra(Envios.EXTRA_POSPUESTO, false)
-        val motivo = intent.getStringExtra(Envios.EXTRA_MOTIVO) ?: Envios.AHORA
-        val ids = intent.getIntArrayExtra(Envios.EXTRA_IDS)?.toSet()
-        val lista = Contactos.activos(this).filter { it.modo.whatsapp && (ids == null || it.id in ids) }
-        if (lista.isEmpty()) { aviso("No hay contactos con WhatsApp para este recordatorio"); finish(); return }
-        val texto = Envios.mensaje(this, r, motivo, pospuesto, true)
-        val textos = lista.mapIndexed { i, c -> (if (i in enviados) "✓ " else "") + "${c.etiqueta} (${c.numero})" }
-        dialogo = AlertDialog.Builder(this, temaDialogo())
-            .setTitle("Enviar por WhatsApp")
-            .setItems(textos.toTypedArray()) { _, i ->
-                enviados += i
-                abriendo = true
-                Envios.abrirWhatsapp(this, lista[i], texto)
+    private fun cargar(i: Intent, nuevo: Boolean) {
+        r = Repositorio.obtener(this, i.getIntExtra(Programador.EXTRA_ID, -1))
+        if (r == null) { aviso("No se encontró el recordatorio"); finish(); return }
+        motivo = i.getStringExtra(Envios.EXTRA_MOTIVO) ?: Envios.AHORA
+        pospuesto = i.getBooleanExtra(Envios.EXTRA_POSPUESTO, false)
+        val ids = i.getIntArrayExtra(Envios.EXTRA_IDS)?.toSet()
+        contactos = Contactos.activos(this).filter { it.modo.whatsapp && (ids == null || it.id in ids) }
+        if (nuevo) {
+            marcados.clear(); marcados += contactos.map { it.id }
+            enviados.clear(); enCola = false
+        }
+    }
+
+    private fun texto() = Envios.mensaje(this, r!!, motivo, pospuesto, true)
+    private fun pendientes() = contactos.filter { it.id in marcados && it.id !in enviados }
+
+    private fun armar() {
+        val rec = r ?: return
+        raiz.removeAllViews()
+        fun txt(t: String, tam: Float = 15f, negrita: Boolean = false) = raiz.addView(TextView(this).apply {
+            text = t; textSize = tam
+            if (negrita) setTypeface(typeface, Typeface.BOLD)
+            setPadding(0, 6, 0, 6)
+        })
+        fun btn(t: String, accion: () -> Unit) = raiz.addView(Button(this).apply { text = t; setOnClickListener { accion() } })
+
+        txt(rec.titulo, 20f, true)
+        txt("Mensaje:", 13f, true)
+        txt(texto())
+        if (contactos.isEmpty()) { txt("No hay contactos con WhatsApp para este recordatorio."); btn("Cerrar") { finish() }; return }
+
+        txt("Contactos (${enviados.size} de ${contactos.count { it.id in marcados }} abiertos en WhatsApp):", 13f, true)
+        contactos.forEach { c ->
+            raiz.addView(CheckBox(this).apply {
+                text = "${c.etiqueta} (${c.numero})" + if (c.id in enviados) "  ✓ abierto" else ""
+                isChecked = c.id in marcados
+                setOnCheckedChangeListener { _, v -> if (v) marcados += c.id else marcados -= c.id; armar() }
+            })
+        }
+        val faltan = pendientes()
+        if (enCola && faltan.isNotEmpty()) {
+            btn("Continuar: enviar a ${faltan.first().etiqueta}") { enviarSiguiente() }
+        } else {
+            btn("Enviar a seleccionados (uno por uno)") {
+                if (pendientes().isEmpty()) enviados.clear()
+                enCola = true
+                enviarSiguiente()
             }
-            .setPositiveButton("Listo", null)
-            .setOnDismissListener { if (!abriendo) finish() }
-            .show()
+        }
+        btn("Elegir varios chats dentro de WhatsApp (un solo envío)") {
+            conDesbloqueo { Envios.compartirWhatsapp(this, texto()) }
+        }
+        txt("«Uno por uno» abre cada chat con el mensaje escrito: tocá Enviar en WhatsApp y volvé acá " +
+            "(desde Recientes o desde la notificación) para seguir con el próximo. «Elegir varios» abre WhatsApp " +
+            "para que marques los chats y envíes el mismo mensaje a todos de una vez.", 12f)
+        btn("Terminar") { quitarProgreso(); finish() }
     }
+
+    private fun enviarSiguiente() {
+        val siguiente = pendientes().firstOrNull()
+        if (siguiente == null) {
+            enCola = false
+            quitarProgreso()
+            aviso("Listo: se abrió WhatsApp para todos los seleccionados")
+            armar()
+            return
+        }
+        conDesbloqueo {
+            if (Envios.abrirWhatsapp(this, siguiente, texto())) {
+                enviados += siguiente.id
+                mostrarProgreso()
+            }
+        }
+    }
+
+    /** Notificación para volver a esta pantalla y seguir con el próximo contacto. */
+    private fun mostrarProgreso() {
+        val rec = r ?: return
+        val faltan = pendientes().size
+        if (faltan == 0) { quitarProgreso(); return }
+        val nm = getSystemService(NotificationManager::class.java)
+        nm.createNotificationChannel(NotificationChannel("envios", "Envíos por WhatsApp", NotificationManager.IMPORTANCE_DEFAULT))
+        val pi = PendingIntent.getActivity(this, rec.id + 3_000_000,
+            Intent(this, EnviarWhatsappActivity::class.java).putExtra(EXTRA_CONTINUAR, true),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+        nm.notify(ID_PROGRESO, Notification.Builder(this, "envios")
+            .setSmallIcon(R.drawable.ic_notif)
+            .setContentTitle("WhatsApp: faltan $faltan contacto(s)")
+            .setContentText("Tocá para seguir con «${rec.titulo}».")
+            .setContentIntent(pi)
+            .setOnlyAlertOnce(true)
+            .build())
+    }
+
+    private fun quitarProgreso() = getSystemService(NotificationManager::class.java).cancel(ID_PROGRESO)
+
+    companion object {
+        const val EXTRA_CONTINUAR = "continuar"
+        private const val ID_PROGRESO = 3_999_999
+    }
+}
+
+/** Ejecuta la acción; si el celular está bloqueado, primero pide desbloquear. */
+fun Activity.conDesbloqueo(accion: () -> Unit) {
+    val km = getSystemService(KeyguardManager::class.java)
+    if (!km.isKeyguardLocked) { accion(); return }
+    km.requestDismissKeyguard(this, object : KeyguardManager.KeyguardDismissCallback() {
+        override fun onDismissSucceeded() { accion() }
+        override fun onDismissCancelled() { aviso("Desbloqueá el celular para continuar") }
+        override fun onDismissError() { aviso("Desbloqueá el celular para continuar") }
+    })
 }
 
 private fun Activity.subtitulo(c: Context, t: String) = TextView(c).apply {
@@ -279,9 +424,9 @@ fun Activity.editarContacto(contenedor: LinearLayout, indice: Int) {
     }
     val modo = Spinner(c).apply {
         adapter = ArrayAdapter(c, android.R.layout.simple_spinner_dropdown_item, ModoEnvio.entries.map { it.texto })
-        setSelection((actual?.modo ?: ModoEnvio.AMBOS).ordinal)
+        setSelection((actual?.modo ?: ModoEnvio.WHATSAPP).ordinal)
     }
-    val porDefecto = CheckBox(c).apply { text = "Forma parte del grupo Default"; isChecked = actual?.porDefecto ?: true }
+    val porDefecto = CheckBox(c).apply { text = "Forma parte del grupo Default"; isChecked = actual?.porDefecto ?: false }
     val caja = LinearLayout(c).apply {
         orientation = LinearLayout.VERTICAL
         setPadding(m, m / 2, m, 0)
@@ -437,6 +582,13 @@ fun Activity.confirmarAvisos(r: Recordatorio, motivo: String, alTerminar: () -> 
 /** Historial de cambios (ChangeLog). Se agrega una entrada con cada versión nueva. */
 object Cambios {
     private val versiones = listOf(
+        "1.7" to listOf(
+            "Al agregar un contacto: grupo Default desmarcado y medio «Solo WhatsApp» por defecto.",
+            "Nueva pantalla «Enviar por WhatsApp»: casillas por contacto, envío uno por uno que se retoma al volver " +
+                "(Recientes o notificación de progreso) y opción de elegir varios chats dentro de WhatsApp en un solo envío.",
+            "WhatsApp se abre directo, sin pasar por el navegador.",
+            "Pantalla completa: corregido el botón «Enviar por WhatsApp» y agregado el botón «Editar»."
+        ),
         "1.6" to listOf(
             "Notas en la lista: hasta 3 líneas con «Mostrar más...», colapsar por recordatorio y botones generales Mostrar/Ocultar notas.",
             "{\"Original Vencido\"} pasa a ser la primera línea de la nota (lista y notificación).",

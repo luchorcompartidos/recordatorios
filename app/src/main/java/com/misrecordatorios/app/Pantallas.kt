@@ -210,15 +210,9 @@ class AlarmaActivity : Activity() {
             val wa = Envios.destinatarios(this@AlarmaActivity, r).filter { it.modo.whatsapp }
             visibility = if (wa.isNotEmpty()) View.VISIBLE else View.GONE
             setOnClickListener {
-                val abrir = { startActivity(Envios.intentWhatsapp(this@AlarmaActivity, id, Envios.AHORA, pospuesta, wa.map { it.id })) }
-                // Con el celular bloqueado, Android no deja abrir otra ventana: primero se pide desbloquear.
-                val km = getSystemService(KeyguardManager::class.java)
-                if (km.isKeyguardLocked) {
-                    km.requestDismissKeyguard(this@AlarmaActivity, object : KeyguardManager.KeyguardDismissCallback() {
-                        override fun onDismissSucceeded() { abrir() }
-                        override fun onDismissCancelled() { aviso("Desbloqueá el celular para enviar por WhatsApp") }
-                    })
-                } else abrir()
+                Registro.anotar(this@AlarmaActivity, "#$id botón WhatsApp de la pantalla completa")
+                Notificador.silenciar(this@AlarmaActivity, id)
+                startActivity(Envios.intentWhatsapp(this@AlarmaActivity, id, Envios.AHORA, pospuesta, wa.map { it.id }))
             }
         }
         val callar = findViewById<Button>(R.id.alCallar)
@@ -243,6 +237,13 @@ class AlarmaActivity : Activity() {
         }
         findViewById<Button>(R.id.alPosponerOtro).setOnClickListener {
             elegirPosponer(id) { pospuesto -> if (pospuesto) finish() }
+        }
+        findViewById<Button>(R.id.alEditar).setOnClickListener {
+            Notificador.silenciar(this, id)
+            conDesbloqueo {
+                startActivity(Intent(this, EditarActivity::class.java).putExtra(Programador.EXTRA_ID, id))
+                finish()
+            }
         }
         findViewById<Button>(R.id.alCerrar).setOnClickListener {
             Notificador.silenciar(this, id)   // la notificación queda en la bandeja, sin sonido
