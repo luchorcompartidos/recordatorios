@@ -2,4 +2,10 @@
 <resources>
     <!-- Tema del sistema: toma los colores del celular y el modo claro/oscuro. -->
     <style name="Tema" parent="android:Theme.DeviceDefault.DayNight" />
+
+    <!-- Para la ventanita de "Posponer…": solo se ve el diálogo. -->
+    <style name="TemaTransparente" parent="android:Theme.Translucent.NoTitleBar">
+        <item name="android:windowNoTitle">true</item>
+        <item name="android:windowAnimationStyle">@null</item>
+    </style>
 </resources>

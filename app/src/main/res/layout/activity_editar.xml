@@ -72,6 +72,13 @@
             android:orientation="horizontal"
             android:visibility="gone" />
 
+        <CheckBox
+            android:id="@+id/cbAlarma"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:text="Sonar como alarma (pantalla completa, sonido hasta que respondas)" />
+
         <Button
             android:id="@+id/btnGuardar"
             android:layout_width="match_parent"

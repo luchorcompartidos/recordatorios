@@ -29,13 +29,14 @@ data class Recordatorio(
     var repeticion: Repeticion,
     var dias: MutableSet<Int>,      // para semanal: 1 = lunes … 7 = domingo
     var diaMes: Int,                // para mensual: día del mes elegido
-    var activo: Boolean             // false = vencido (no se repite y ya sonó)
+    var activo: Boolean,            // false = vencido (no se repite y ya sonó)
+    var alarma: Boolean = false     // true = suena como alarma con pantalla completa
 ) {
     fun aJson(): JSONObject = JSONObject()
         .put("id", id).put("titulo", titulo).put("nota", nota)
         .put("proxima", proxima).put("rep", repeticion.codigo)
         .put("dias", JSONArray(dias.toList())).put("diaMes", diaMes)
-        .put("activo", activo)
+        .put("activo", activo).put("alarma", alarma)
 
     companion object {
         fun desdeJson(o: JSONObject): Recordatorio {
@@ -48,7 +49,8 @@ data class Recordatorio(
                 repeticion = Repeticion.desdeCodigo(o.optString("rep", "N")),
                 dias = MutableList(arr.length()) { arr.getInt(it) }.toMutableSet(),
                 diaMes = o.optInt("diaMes", 1),
-                activo = o.optBoolean("activo", true)
+                activo = o.optBoolean("activo", true),
+                alarma = o.optBoolean("alarma", false)
             )
         }
     }

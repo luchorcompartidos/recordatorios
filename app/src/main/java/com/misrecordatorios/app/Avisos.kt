@@ -9,6 +9,8 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.graphics.drawable.Icon
+import android.media.AudioAttributes
+import android.media.RingtoneManager
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 
@@ -16,7 +18,8 @@ import java.util.Locale
 object Programador {
     const val EXTRA_ID = "id"
     const val EXTRA_POSPUESTO = "pospuesto"
-    const val MINUTOS_POSPONER = 10L
+    const val EXTRA_MINUTOS = "minutos"
+    val OPCIONES_POSPONER = listOf(1, 2, 3, 4, 5, 10)
 
     private fun pendiente(ctx: Context, id: Int, pospuesto: Boolean): PendingIntent {
         val i = Intent(ctx, AlarmaReceiver::class.java)
@@ -42,8 +45,9 @@ object Programador {
         if (r.activo) alarmaEn(ctx, r.proxima, pendiente(ctx, r.id, false))
     }
 
-    fun posponer(ctx: Context, id: Int) {
-        val momento = System.currentTimeMillis() + MINUTOS_POSPONER * 60_000
+    fun posponer(ctx: Context, id: Int, minutos: Int) {
+        ctx.getSystemService(NotificationManager::class.java).cancel(id)
+        val momento = System.currentTimeMillis() + minutos * 60_000L
         alarmaEn(ctx, momento, pendiente(ctx, id, true))
     }
 
@@ -72,7 +76,7 @@ object Programador {
         val ahora = System.currentTimeMillis()
         Repositorio.todos(ctx).filter { it.activo }.forEach { r ->
             if (r.proxima <= ahora) {
-                Notificador.mostrar(ctx, r)   // se perdió mientras estaba apagado
+                Notificador.mostrar(ctx, r, comoAlarma = false)   // se perdió mientras estaba apagado
                 avanzar(ctx, r)
             } else {
                 programar(ctx, r)
@@ -81,42 +85,117 @@ object Programador {
     }
 }
 
+object Ajustes {
+    private fun prefs(ctx: Context) = ctx.getSharedPreferences("ajustes", Context.MODE_PRIVATE)
+    fun alarmaPorDefecto(ctx: Context) = prefs(ctx).getBoolean("alarma_defecto", false)
+    fun guardarAlarmaPorDefecto(ctx: Context, valor: Boolean) =
+        prefs(ctx).edit().putBoolean("alarma_defecto", valor).apply()
+}
+
 object Notificador {
     private const val CANAL = "recordatorios"
+    private const val CANAL_ALARMA = "alarmas_v1"
+    private const val CANAL_MUDO = "alarmas_silenciadas_v1"
     const val ACCION_HECHO = "com.misrecordatorios.HECHO"
     const val ACCION_POSPONER = "com.misrecordatorios.POSPONER"
+    const val ACCION_CALLAR = "com.misrecordatorios.CALLAR"
 
-    fun crearCanal(ctx: Context) {
-        val canal = NotificationChannel(CANAL, "Recordatorios", NotificationManager.IMPORTANCE_HIGH)
+    fun crearCanales(ctx: Context) {
+        val normal = NotificationChannel(CANAL, "Recordatorios", NotificationManager.IMPORTANCE_HIGH)
             .apply { description = "Avisos de tus recordatorios"; enableVibration(true) }
-        ctx.getSystemService(NotificationManager::class.java).createNotificationChannel(canal)
+        val audio = AudioAttributes.Builder()
+            .setUsage(AudioAttributes.USAGE_ALARM)
+            .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+            .build()
+        val alarma = NotificationChannel(CANAL_ALARMA, "Alarmas", NotificationManager.IMPORTANCE_HIGH).apply {
+            description = "Recordatorios que suenan como alarma"
+            setSound(RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM), audio)
+            enableVibration(true)
+            vibrationPattern = longArrayOf(0, 800, 600)
+        }
+        val mudo = NotificationChannel(CANAL_MUDO, "Alarmas silenciadas", NotificationManager.IMPORTANCE_HIGH).apply {
+            description = "Alarma ya silenciada con «Callar»"
+            setSound(null, null)
+            enableVibration(false)
+        }
+        ctx.getSystemService(NotificationManager::class.java)
+            .createNotificationChannels(listOf(normal, alarma, mudo))
     }
 
-    private fun accion(ctx: Context, id: Int, accion: String, texto: String): Notification.Action {
-        val i = Intent(ctx, AccionReceiver::class.java).setAction(accion).putExtra(Programador.EXTRA_ID, id)
-        val pi = PendingIntent.getBroadcast(ctx, id, i,
+    /** Deja la alarma en la bandeja y en pantalla, pero sin sonido. */
+    fun silenciar(ctx: Context, id: Int) {
+        val nm = ctx.getSystemService(NotificationManager::class.java)
+        if (nm.activeNotifications.none { it.id == id }) return
+        val r = Repositorio.obtener(ctx, id) ?: return
+        mostrar(ctx, r, comoAlarma = true, silenciada = true)
+    }
+
+    private fun pantallaAlarma(ctx: Context, id: Int) = PendingIntent.getActivity(ctx, id,
+        Intent(ctx, AlarmaActivity::class.java).putExtra(Programador.EXTRA_ID, id)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+
+    private fun boton(ctx: Context, texto: String, pi: PendingIntent) =
+        Notification.Action.Builder(Icon.createWithResource(ctx, R.drawable.ic_notif), texto, pi).build()
+
+    private fun accion(ctx: Context, id: Int, accion: String, minutos: Int = 0): PendingIntent {
+        val i = Intent(ctx, AccionReceiver::class.java).setAction(accion)
+            .putExtra(Programador.EXTRA_ID, id).putExtra(Programador.EXTRA_MINUTOS, minutos)
+        return PendingIntent.getBroadcast(ctx, id, i,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
-        return Notification.Action.Builder(Icon.createWithResource(ctx, R.drawable.ic_notif), texto, pi).build()
     }
 
-    fun mostrar(ctx: Context, r: Recordatorio) {
-        crearCanal(ctx)
+    fun mostrar(ctx: Context, r: Recordatorio, comoAlarma: Boolean = r.alarma, silenciada: Boolean = false) {
+        crearCanales(ctx)
+        val nm = ctx.getSystemService(NotificationManager::class.java)
+        // Si quedó una notificación anterior del mismo recordatorio, se quita para que la nueva
+        // aparezca como nueva (con sonido, emergente y arriba) y no como una actualización silenciosa.
+        if (!silenciada) nm.cancel(r.id)
+        val elegir = PendingIntent.getActivity(ctx, r.id,
+            Intent(ctx, PosponerActivity::class.java).putExtra(Programador.EXTRA_ID, r.id)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_MULTIPLE_TASK),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
         val abrir = PendingIntent.getActivity(ctx, r.id,
             Intent(ctx, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
         val texto = r.nota.ifBlank { "Recordatorio de las " + Formato.hora(r.proxima) }
-        val n = Notification.Builder(ctx, CANAL)
+        val canal = when {
+            !comoAlarma -> CANAL
+            silenciada -> CANAL_MUDO
+            else -> CANAL_ALARMA
+        }
+        val b = Notification.Builder(ctx, canal)
             .setSmallIcon(R.drawable.ic_notif)
             .setContentTitle(r.titulo)
             .setContentText(texto)
             .setStyle(Notification.BigTextStyle().bigText(texto))
-            .setCategory(Notification.CATEGORY_REMINDER)
-            .setContentIntent(abrir)
+            .setVisibility(Notification.VISIBILITY_PUBLIC)
+            .setShowWhen(true)
             .setAutoCancel(true)
-            .addAction(accion(ctx, r.id, ACCION_HECHO, "Hecho"))
-            .addAction(accion(ctx, r.id, ACCION_POSPONER, "Posponer ${Programador.MINUTOS_POSPONER} min"))
-            .build()
-        ctx.getSystemService(NotificationManager::class.java).notify(r.id, n)
+            .addAction(boton(ctx, "Hecho", accion(ctx, r.id, ACCION_HECHO)))
+
+        if (comoAlarma) {
+            // Pantalla completa: con el celular bloqueado abre la pantalla de alarma;
+            // desbloqueado, la notificación emergente queda fija hasta que se haga una acción.
+            val pantalla = pantallaAlarma(ctx, r.id)
+            b.setCategory(Notification.CATEGORY_ALARM)
+                .setContentIntent(pantalla)
+                .setFullScreenIntent(pantalla, true)
+                .setOnlyAlertOnce(silenciada)
+                .addAction(boton(ctx, "Posponer…", elegir))
+            if (!silenciada) b.addAction(boton(ctx, "Callar", accion(ctx, r.id, ACCION_CALLAR)))
+            else b.addAction(boton(ctx, "Posponer 5 min", accion(ctx, r.id, ACCION_POSPONER, 5)))
+        } else {
+            b.setCategory(Notification.CATEGORY_REMINDER)
+                .setWhen(System.currentTimeMillis())
+                .setContentIntent(abrir)
+                .addAction(boton(ctx, "Posponer 5 min", accion(ctx, r.id, ACCION_POSPONER, 5)))
+                .addAction(boton(ctx, "Posponer…", elegir))
+        }
+        val n = b.build()
+        // Sonido en bucle hasta que se toque Hecho, Posponer o Callar (o se abra la bandeja).
+        if (comoAlarma && !silenciada) n.flags = n.flags or Notification.FLAG_INSISTENT
+        nm.notify(r.id, n)
     }
 }
 
@@ -138,7 +217,8 @@ object Formato {
             Repeticion.SEMANAL -> " · " + r.dias.sorted().joinToString(", ") { dias[it - 1] }
             Repeticion.MENSUAL -> " · Mensual (día ${r.diaMes})"
         }
-        return (if (r.activo) "" else "Vencido: ") + completo(r.proxima) + rep
+        return (if (r.activo) "" else "Vencido: ") + completo(r.proxima) + rep +
+            (if (r.alarma) " · Alarma" else "")
     }
 }
 
@@ -162,8 +242,12 @@ class AlarmaReceiver : BroadcastReceiver() {
 class AccionReceiver : BroadcastReceiver() {
     override fun onReceive(ctx: Context, intent: Intent) {
         val id = intent.getIntExtra(Programador.EXTRA_ID, -1)
-        ctx.getSystemService(NotificationManager::class.java).cancel(id)
-        if (intent.action == Notificador.ACCION_POSPONER) Programador.posponer(ctx, id)
+        when (intent.action) {
+            Notificador.ACCION_CALLAR -> Notificador.silenciar(ctx, id)
+            Notificador.ACCION_POSPONER ->
+                Programador.posponer(ctx, id, intent.getIntExtra(Programador.EXTRA_MINUTOS, 5))
+            else -> ctx.getSystemService(NotificationManager::class.java).cancel(id)
+        }
     }
 }
 

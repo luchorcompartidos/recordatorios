@@ -20,7 +20,11 @@ import android.widget.CheckBox
 import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.Spinner
+import android.widget.Switch
 import android.widget.TextView
+import android.content.res.Configuration
+import android.view.Menu
+import android.view.MenuItem
 import android.widget.Toast
 import java.time.LocalDate
 import java.time.ZonedDateTime
@@ -32,6 +36,114 @@ fun Activity.confirmarBorrado(r: Recordatorio, alTerminar: () -> Unit) {
         .setPositiveButton("Borrar") { _, _ -> Programador.borrar(this, r.id); alTerminar() }
         .setNegativeButton("Cancelar", null)
         .show()
+}
+
+/** Lista de 1, 2, 3, 4, 5 y 10 minutos. [alCerrar] recibe true si se pospuso. */
+fun Activity.elegirPosponer(id: Int, alCerrar: (Boolean) -> Unit) {
+    val nocturno = (resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) ==
+        Configuration.UI_MODE_NIGHT_YES
+    val tema = if (nocturno) android.R.style.Theme_DeviceDefault_Dialog_Alert
+               else android.R.style.Theme_DeviceDefault_Light_Dialog_Alert
+    val opciones = Programador.OPCIONES_POSPONER
+    val textos = opciones.map { if (it == 1) "1 minuto" else "$it minutos" }.toTypedArray()
+    var pospuesto = false
+    AlertDialog.Builder(this, tema)
+        .setTitle("Posponer")
+        .setItems(textos) { _, i ->
+            Programador.posponer(this, id, opciones[i])
+            pospuesto = true
+            Toast.makeText(this, "Pospuesto ${textos[i]}", Toast.LENGTH_SHORT).show()
+        }
+        .setNegativeButton("Cancelar", null)
+        .setOnDismissListener { alCerrar(pospuesto) }
+        .show()
+}
+
+/** Ventanita que se abre desde "Posponer…" en la notificación. */
+class PosponerActivity : Activity() {
+    override fun onCreate(estado: Bundle?) {
+        super.onCreate(estado)
+        elegirPosponer(intent.getIntExtra(Programador.EXTRA_ID, -1)) { finish() }
+    }
+}
+
+/** Pantalla de alarma: aparece sobre la pantalla bloqueada. */
+class AlarmaActivity : Activity() {
+    private var id = -1
+
+    override fun onCreate(estado: Bundle?) {
+        super.onCreate(estado)
+        setShowWhenLocked(true)
+        setTurnScreenOn(true)
+        setContentView(R.layout.activity_alarma)
+        cargar(intent)
+    }
+
+    override fun onNewIntent(nuevo: Intent) {
+        super.onNewIntent(nuevo)
+        setIntent(nuevo)
+        cargar(nuevo)
+    }
+
+    private fun cargar(i: Intent) {
+        id = i.getIntExtra(Programador.EXTRA_ID, -1)
+        val r = Repositorio.obtener(this, id) ?: run { finish(); return }
+        findViewById<TextView>(R.id.alHora).text = Formato.hora(System.currentTimeMillis())
+        findViewById<TextView>(R.id.alTitulo).text = r.titulo
+        findViewById<TextView>(R.id.alNota).apply {
+            text = r.nota
+            visibility = if (r.nota.isBlank()) View.GONE else View.VISIBLE
+        }
+        val callar = findViewById<Button>(R.id.alCallar)
+        callar.isEnabled = true
+        callar.text = "Callar"
+        callar.setOnClickListener {
+            Notificador.silenciar(this, id)
+            callar.isEnabled = false
+            callar.text = "Silenciada"
+        }
+        findViewById<Button>(R.id.alHecho).setOnClickListener {
+            getSystemService(NotificationManager::class.java).cancel(id)
+            finish()
+        }
+        findViewById<Button>(R.id.alPosponer5).setOnClickListener {
+            Programador.posponer(this, id, 5)
+            finish()
+        }
+        findViewById<Button>(R.id.alPosponerOtro).setOnClickListener {
+            elegirPosponer(id) { pospuesto -> if (pospuesto) finish() }
+        }
+        findViewById<Button>(R.id.alCerrar).setOnClickListener {
+            Notificador.silenciar(this, id)   // la notificación queda en la bandeja, sin sonido
+            finish()
+        }
+    }
+}
+
+/** Ajustes generales. */
+class AjustesActivity : Activity() {
+    override fun onCreate(estado: Bundle?) {
+        super.onCreate(estado)
+        title = "Ajustes"
+        val margen = (16 * resources.displayMetrics.density).toInt()
+        val sw = Switch(this).apply {
+            text = "Crear los recordatorios nuevos con alarma sonora"
+            textSize = 16f
+            isChecked = Ajustes.alarmaPorDefecto(this@AjustesActivity)
+            setOnCheckedChangeListener { _, v -> Ajustes.guardarAlarmaPorDefecto(this@AjustesActivity, v) }
+        }
+        val ayuda = TextView(this).apply {
+            text = "Solo define cómo aparece marcada la opción al crear un recordatorio. " +
+                "Siempre se puede cambiar en cada uno."
+            setPadding(0, margen / 2, 0, 0)
+        }
+        setContentView(LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(margen, margen, margen, margen)
+            addView(sw)
+            addView(ayuda)
+        })
+    }
 }
 
 /** Pantalla principal: lista de recordatorios. */
@@ -47,10 +159,20 @@ class MainActivity : Activity() {
         findViewById<Button>(R.id.btnNuevo).setOnClickListener {
             startActivity(Intent(this, EditarActivity::class.java))
         }
-        Notificador.crearCanal(this)
+        Notificador.crearCanales(this)
         if (checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
             requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 1)
         }
+    }
+
+    override fun onCreateOptionsMenu(menu: Menu): Boolean {
+        menu.add(0, 1, 0, "Ajustes")
+        return true
+    }
+
+    override fun onOptionsItemSelected(item: MenuItem): Boolean {
+        if (item.itemId == 1) { startActivity(Intent(this, AjustesActivity::class.java)); return true }
+        return super.onOptionsItemSelected(item)
     }
 
     override fun onResume() {
@@ -75,9 +197,16 @@ class MainActivity : Activity() {
             !am.canScheduleExactAlarms() -> mostrarAviso("Falta el permiso de alarmas exactas. Tocá acá para habilitarlo.") {
                 startActivity(Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM, Uri.parse("package:$packageName")))
             }
+            usaAlarmas() && !nm.canUseFullScreenIntent() ->
+                mostrarAviso("Para que las alarmas aparezcan a pantalla completa falta un permiso. Tocá acá para habilitarlo.") {
+                    startActivity(Intent(Settings.ACTION_MANAGE_APP_USE_FULL_SCREEN_INTENT, Uri.parse("package:$packageName")))
+                }
             else -> aviso.visibility = View.GONE
         }
     }
+
+    private fun usaAlarmas() =
+        Ajustes.alarmaPorDefecto(this) || Repositorio.todos(this).any { it.alarma && it.activo }
 
     private fun mostrarAviso(texto: String, alTocar: () -> Unit) {
         aviso.text = texto
@@ -127,6 +256,7 @@ class EditarActivity : Activity() {
     private lateinit var btnHora: Button
     private lateinit var spRep: Spinner
     private lateinit var filaDias: LinearLayout
+    private lateinit var cbAlarma: CheckBox
     private val checks = mutableListOf<CheckBox>()
 
     override fun onCreate(estado: Bundle?) {
@@ -138,6 +268,7 @@ class EditarActivity : Activity() {
         btnHora = findViewById(R.id.btnHora)
         spRep = findViewById(R.id.spRepeticion)
         filaDias = findViewById(R.id.filaDias)
+        cbAlarma = findViewById(R.id.cbAlarma)
         val btnBorrar = findViewById<Button>(R.id.btnBorrar)
 
         listOf("L", "M", "X", "J", "V", "S", "D").forEachIndexed { i, letra ->
@@ -163,10 +294,12 @@ class EditarActivity : Activity() {
             fechaHora = Calculo.zdt(r.proxima)
             spRep.setSelection(r.repeticion.ordinal)
             checks.forEach { it.isChecked = (it.tag as Int) in r.dias }
+            cbAlarma.isChecked = r.alarma
             btnBorrar.visibility = View.VISIBLE
             btnBorrar.setOnClickListener { confirmarBorrado(r) { finish() } }
         } else {
             title = "Nuevo recordatorio"
+            cbAlarma.isChecked = Ajustes.alarmaPorDefecto(this)
             fechaHora = ZonedDateTime.now().plusHours(1).withMinute(0).withSecond(0).withNano(0)
         }
         actualizarBotones()
@@ -220,9 +353,13 @@ class EditarActivity : Activity() {
             repeticion = rep,
             dias = if (rep == Repeticion.SEMANAL) dias else mutableSetOf(),
             diaMes = fechaHora.dayOfMonth,
-            activo = true
+            activo = true,
+            alarma = cbAlarma.isChecked
         )
         Calculo.ajustarInicio(r, ahora)
+        // Limpia lo anterior (alarma, posposición pendiente y notificación vieja) antes de reprogramar.
+        Programador.cancelar(this, r.id)
+        getSystemService(NotificationManager::class.java).cancel(r.id)
         Repositorio.guardar(this, r)
         Programador.programar(this, r)
         aviso("Guardado para el " + Formato.completo(r.proxima))
