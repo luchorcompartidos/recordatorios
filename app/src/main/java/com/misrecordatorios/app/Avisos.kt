@@ -371,6 +371,10 @@ object Formato {
     val DIAS_SEMANA = listOf("lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo")
     fun textoNSemana(n: Int, dia: Int) = "El ${ORDINALES[(n - 1).coerceIn(0, 4)]} ${DIAS_SEMANA[(dia - 1).coerceIn(0, 6)]} de cada mes"
 
+    private val fSms = DateTimeFormatter.ofPattern("dd/MM/yy HH:mm", loc)
+    /** Fecha corta para SMS: "07/11/26 14:00" (solo caracteres que no fuerzan Unicode). */
+    fun sms(ms: Long): String = Calculo.zdt(ms).format(fSms)
+
     fun fecha(ms: Long): String = Calculo.zdt(ms).format(fFecha)
     fun hora(ms: Long): String = Calculo.zdt(ms).format(fHora)
     fun completo(ms: Long): String = Calculo.zdt(ms).format(fCompleto)
@@ -393,6 +397,7 @@ object Formato {
 /** Suena la alarma: muestra la notificación y programa la próxima. */
 class AlarmaReceiver : BroadcastReceiver() {
     override fun onReceive(ctx: Context, intent: Intent) {
+        Contactos.cargarTachado(ctx)   // la app puede estar cerrada: se lee el ajuste
         val r = Repositorio.obtener(ctx, intent.getIntExtra(Programador.EXTRA_ID, -1)) ?: return
         if (r.archivado || r.cumplido) return
         val pospuesto = intent.getBooleanExtra(Programador.EXTRA_POSPUESTO, false)

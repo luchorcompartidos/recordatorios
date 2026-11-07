@@ -319,6 +319,7 @@ class MainActivity : Activity() {
             startActivity(Intent(this, EditarActivity::class.java))
         }
         Notificador.crearCanales(this)
+        Contactos.cargarTachado(this)
         if (checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
             requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 1)
         }
@@ -1077,6 +1078,9 @@ class EditarActivity : Activity() {
         aviso("Guardado para el " + Formato.completo(r.proxima))
         // "Omitir SMS para esta edición": marcado si no cambió la fecha, la hora ni la repetición.
         if (o != null && o.sinSms != r.sinSms) Registro.anotar(this, "#${r.id} SMS " + if (r.sinSms) "inactivo" else "activo")
-        confirmarAvisos(r, if (o == null) Envios.NUEVO else Envios.EDITADO, omitirPorDefecto = !cambioFecha) { finish() }
+        // Fecha anterior: solo si cambió la fecha/hora (para {estado}).
+        val anterior = if (o != null && o.proxima != r.proxima) o.proxima else 0L
+        confirmarAvisos(r, if (o == null) Envios.NUEVO else Envios.EDITADO, omitirPorDefecto = !cambioFecha,
+            anterior = anterior) { finish() }
     }
 }

@@ -403,6 +403,18 @@ class AjustesActivity : Activity() {
                 .show()
         }
         refrescarRespaldo()
+        raiz.addView(Switch(this).apply {
+            text = "Tachado en SMS (experimental): «Antes: [fecha]» tachado"
+            textSize = 16f
+            isChecked = Contactos.tachadoSms
+            setOnCheckedChangeListener { _, v ->
+                Contactos.guardarTachado(this@AjustesActivity, v)
+                aviso(if (v) "Tachado en SMS activado" else "Tachado en SMS desactivado")
+            }
+        })
+        texto("Puede hacer que cada SMS admita menos caracteres (y se divida en más SMS) y verse mal en algunos teléfonos. " +
+            "Probalo antes con «Enviar SMS de prueba».")
+        boton("Enviar SMS de prueba") { enviarSmsPrueba() }
         boton("Texto del aviso por WhatsApp") { editarPlantilla(true) }
         boton("Texto del aviso por SMS") { editarPlantilla(false) }
 

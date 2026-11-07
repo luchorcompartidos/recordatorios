@@ -81,6 +81,12 @@ object Contactos {
     fun defaults(ctx: Context) = activos(ctx).filter { it.porDefecto }
 
     fun smsHabilitado(ctx: Context) = prefs(ctx).getBoolean("sms_on", true)
+
+    /** Tachado en SMS (experimental, desactivado por defecto). Se carga al iniciar y al cambiarlo. */
+    var tachadoSms = false
+        private set
+    fun cargarTachado(ctx: Context) { tachadoSms = prefs(ctx).getBoolean("tachado_sms", false) }
+    fun guardarTachado(ctx: Context, v: Boolean) { prefs(ctx).edit().putBoolean("tachado_sms", v).apply(); tachadoSms = v }
     fun guardarSmsHabilitado(ctx: Context, v: Boolean) = prefs(ctx).edit().putBoolean("sms_on", v).apply()
 
     fun plantilla(ctx: Context, whatsapp: Boolean): String =
@@ -130,6 +136,7 @@ object Contactos {
         .put("pl_s", plantilla(ctx, false))
         .put("sms_respaldo", prefs(ctx).getString("sms_respaldo", null))
         .put("sms_respaldo_fecha", fechaRespaldoSms(ctx))
+        .put("tachado_sms", prefs(ctx).getBoolean("tachado_sms", false))
         .put("susp", prefs(ctx).getLong("susp", 0))
 
     fun importar(ctx: Context, o: JSONObject) {
@@ -140,8 +147,10 @@ object Contactos {
             .putString("pl_s", o.optString("pl_s", PLANTILLA_DEFECTO))
             .putString("sms_respaldo", o.optString("sms_respaldo").ifBlank { null })
             .putLong("sms_respaldo_fecha", o.optLong("sms_respaldo_fecha", 0))
+            .putBoolean("tachado_sms", o.optBoolean("tachado_sms", false))
             .putLong("susp", o.optLong("susp", 0))
             .apply()
+        cargarTachado(ctx)
     }
 }
 
@@ -155,11 +164,34 @@ object Envios {
     const val PREVIO = "En 15 minutos"
     const val AHORA = "Ahora"
 
-    fun mensaje(ctx: Context, r: Recordatorio, motivo: String, pospuesto: Boolean, whatsapp: Boolean): String {
+    /** Texto de {estado} según el momento del aviso. */
+    fun estado(r: Recordatorio, motivo: String, pospuesto: Boolean, anterior: Long, whatsapp: Boolean = false): String = when {
+        // En SMS, sin llaves ni comillas (las llaves cuentan doble).
+        pospuesto -> if (whatsapp) "{\"Original Vencido\"}" else "Original Vencido"
+        motivo == EDITADO && anterior > 0 && anterior != r.proxima -> {
+            val f: (Long) -> String = if (whatsapp) Formato::completo else Formato::sms
+            val antes = "Antes: ${f(anterior)}"
+            // En WhatsApp, ~texto~ se ve tachado (dato desestimado). En SMS no hay formato.
+            val tachado = when {
+                whatsapp -> "~$antes~"
+                Contactos.tachadoSms -> tacharUnicode(antes)
+                else -> antes
+            }
+            "$tachado → Nueva Fecha/Hora: ${f(r.proxima)}"
+        }
+        motivo == PREVIO -> "Comienza en 15 minutos"
+        motivo == AHORA -> "Es ahora"
+        else -> ""   // nuevo, o modificado sin cambio de fecha ni hora: queda vacío
+    }
+
+    /** Tachado para SMS (experimental): agrega el carácter combinante U+0336 después de cada letra. */
+    fun tacharUnicode(t: String) = t.map { "$it\u0336" }.joinToString("")
+
+    fun mensaje(ctx: Context, r: Recordatorio, motivo: String, pospuesto: Boolean, whatsapp: Boolean, anterior: Long = 0): String {
         val hora = if (pospuesto) System.currentTimeMillis() else r.proxima
         val campos = mapOf(
             "{motivo}" to motivo, "{titulo}" to r.titulo, "{nota}" to r.nota,
-            "{hora}" to Formato.completo(hora), "{estado}" to if (pospuesto) "{\"Original Vencido\"}" else ""
+            "{hora}" to (if (whatsapp) Formato.completo(hora) else Formato.sms(hora)), "{estado}" to estado(r, motivo, pospuesto, anterior, whatsapp)
         )
         // Se respetan las líneas vacías o con espacios escritas en el texto; solo se quita una línea
         // cuando queda vacía porque un campo vino vacío (por ejemplo {nota} sin nota).
@@ -168,7 +200,57 @@ object Envios {
             var res = linea
             campos.forEach { (k, v) -> res = res.replace(k, v) }
             if (tieneCampos && res.isBlank()) null else res
-        }.joinToString("\n")
+        }.joinToString("\n").let {
+            if (whatsapp) it else paraSms(it).let { t -> if (r.convertirSms) convertirGsm(t) else t }
+        }
+    }
+
+    /** Ajustes seguros para que el SMS ocupe menos: "→" (fuerza Unicode) pasa a "->". */
+    fun paraSms(t: String) = t.replace("→", "->")
+
+    private fun esGsm(ch: String) = medir(ch)[3] != android.telephony.SmsMessage.ENCODING_16BIT
+
+    /**
+     * "Convertir caracteres": reemplaza solo los caracteres que fuerzan Unicode (según el propio Android)
+     * por equivalentes estándar: letras sin tilde, comillas y guiones simples, "..." en vez de "…".
+     * Los que no tengan equivalente quedan como están.
+     */
+    fun convertirGsm(t: String): String {
+        val sb = StringBuilder()
+        var i = 0
+        while (i < t.length) {
+            val cp = t.codePointAt(i)
+            val ch = String(Character.toChars(cp))
+            i += Character.charCount(cp)
+            if (esGsm(ch)) { sb.append(ch); continue }
+            val reemplazo = when (ch) {
+                "“", "”", "«", "»" -> "\""
+                "‘", "’" -> "'"
+                "–", "—" -> "-"
+                "…" -> "..."
+                "→" -> "->"
+                "\u0336" -> ""   // marca de tachado
+                else -> java.text.Normalizer.normalize(ch, java.text.Normalizer.Form.NFD)
+                    .replace(Regex("\\p{M}+"), "")
+            }
+            sb.append(if (reemplazo.isNotEmpty() && reemplazo.all { esGsm(it.toString()) }) reemplazo
+                      else if (reemplazo.isEmpty()) "" else ch)
+        }
+        return sb.toString()
+    }
+
+    /** ¿La conversión cambiaría el texto? */
+    fun convertible(t: String) = convertirGsm(t) != t
+
+    /** Cálculo oficial de Android: [cantidad de SMS, caracteres usados, restantes, 1 = GSM-7 / 3 = Unicode]. */
+    fun medir(t: String): IntArray = android.telephony.SmsMessage.calculateLength(t, false)
+
+    /** Descripción del tamaño: "2 SMS · 95 caracteres · Unicode (70 por SMS; 67 si se divide)". */
+    fun descripcionTamanio(t: String): String {
+        val m = medir(t)
+        val unicode = m[3] == android.telephony.SmsMessage.ENCODING_16BIT
+        val cod = if (unicode) "Unicode (70 por SMS; 67 si se divide)" else "estándar (160 por SMS; 153 si se divide)"
+        return "${m[0]} SMS · ${t.length} caracteres · codificación $cod"
     }
 
     /** Contactos elegidos para el recordatorio (si nunca se eligieron: el grupo Default). */
@@ -184,7 +266,15 @@ object Envios {
     fun enviarProgramado(ctx: Context, r: Recordatorio, motivo: String, pospuesto: Boolean) {
         val lista = destinatarios(ctx, r)
         if (lista.isEmpty()) return
-        lista.filter { usaSms(ctx, r, it) }.forEach { enviarSms(ctx, it, mensaje(ctx, r, motivo, pospuesto, false)) }
+        val omitido = (motivo == PREVIO && r.omitirSmsPrevio) || (motivo == AHORA && r.omitirSmsAhora)
+        if (omitido) Registro.anotar(ctx, "#${r.id} SMS programado omitido ($motivo)")
+        val conSms = if (omitido) emptyList() else lista.filter { usaSms(ctx, r, it) }
+        if (conSms.isNotEmpty()) {
+            val texto = mensaje(ctx, r, motivo, pospuesto, false)
+            val partes = medir(texto)[0]
+            if (partes > 1) Registro.anotar(ctx, "#${r.id} SMS programado de $partes partes ($motivo)")
+            conSms.forEach { enviarSms(ctx, it, texto) }
+        }
         val wa = lista.filter { it.modo.whatsapp }
         if (wa.isNotEmpty()) notificarWhatsapp(ctx, r, motivo, pospuesto, wa.map { it.id })
     }
@@ -218,12 +308,15 @@ object Envios {
         Registro.anotar(ctx, "#${r.id} WhatsApp listo para enviar ($motivo)")
     }
 
-    fun intentWhatsapp(ctx: Context, id: Int, motivo: String, pospuesto: Boolean, ids: List<Int>): Intent =
+    const val EXTRA_ANTERIOR = "anterior"
+
+    fun intentWhatsapp(ctx: Context, id: Int, motivo: String, pospuesto: Boolean, ids: List<Int>, anterior: Long = 0): Intent =
         Intent(ctx, EnviarWhatsappActivity::class.java)
             .putExtra(Programador.EXTRA_ID, id)
             .putExtra(EXTRA_MOTIVO, motivo)
             .putExtra(EXTRA_POSPUESTO, pospuesto)
             .putExtra(EXTRA_IDS, ids.toIntArray())
+            .putExtra(EXTRA_ANTERIOR, anterior)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
 
     private val PAQUETES = listOf("com.whatsapp", "com.whatsapp.w4b", null)   // WhatsApp, WhatsApp Business, cualquiera
@@ -315,7 +408,8 @@ class EnviarWhatsappActivity : Activity() {
         }
     }
 
-    private fun texto() = Envios.mensaje(this, r!!, motivo, pospuesto, true)
+    private fun texto() = Envios.mensaje(this, r!!, motivo, pospuesto, true,
+        intent.getLongExtra(Envios.EXTRA_ANTERIOR, 0))
     private fun pendientes() = contactos.filter { it.id in marcados && it.id !in enviados }
 
     private fun armar() {
@@ -553,7 +647,8 @@ fun Activity.editarPlantilla(whatsapp: Boolean) {
     val ayuda = TextView(c).apply {
         textSize = 12f
         text = "Campos disponibles:\n{motivo} Nuevo / Modificado / En 15 minutos / Ahora\n{titulo} {nota} {hora}\n" +
-            "{estado} {\"Original Vencido\"} si fue pospuesto\nLas líneas vacías o con espacios se respetan; solo se " +
+            "{estado} cambio de fecha («Antes: … → Nueva Fecha/Hora: …»), «Comienza en 15 minutos», «Es ahora» " +
+            "o {\"Original Vencido\"} si fue pospuesto\nLas líneas vacías o con espacios se respetan; solo se " +
             "omite una línea si queda vacía porque un campo vino vacío."
     }
     val caja = LinearLayout(c).apply {
@@ -605,7 +700,8 @@ fun Activity.elegirContactos(seleccion: MutableSet<Int>, alCambiar: () -> Unit) 
  * Al crear o editar: confirma a quién avisar. Nada se envía sin tocar un botón de Enviar.
  * "Anular envío de SMS" queda guardado en el recordatorio y también afecta a los avisos programados.
  */
-fun Activity.confirmarAvisos(r: Recordatorio, motivo: String, omitirPorDefecto: Boolean = false, alTerminar: () -> Unit) {
+fun Activity.confirmarAvisos(r: Recordatorio, motivo: String, omitirPorDefecto: Boolean = false, anterior: Long = 0,
+                             alTerminar: () -> Unit) {
     val activos = Contactos.activos(this)
     if (activos.isEmpty()) { alTerminar(); return }
     val sel = Envios.destinatarios(this, r).map { it.id }.toSet()
@@ -664,6 +760,59 @@ fun Activity.confirmarAvisos(r: Recordatorio, motivo: String, omitirPorDefecto: 
     caja.addView(leyenda)
     caja.addView(omitir)
     caja.addView(notaOmitir)
+
+    // --- SMS programados: validación de tamaño y omisión (anticipatorio / hora exacta) ---
+    val haySmsProgramado = !bloqueados && Envios.destinatarios(this, r).any { it.modo.sms }
+    val cbTodos = CheckBox(c).apply { text = "OMITIR SMS PROGRAMADOS (anticipatorio y hora exacta)" }
+    val cbPrevio = CheckBox(c).apply { text = "Omitir SMS anticipatorio (15 min antes)"; isChecked = r.omitirSmsPrevio }
+    val tvPrevio = TextView(c).apply { textSize = 12f }
+    val cbAhora = CheckBox(c).apply { text = "Omitir SMS de la hora exacta del evento"; isChecked = r.omitirSmsAhora }
+    val tvAhora = TextView(c).apply { textSize = 12f }
+    val btnConvertir = android.widget.Button(c).apply { text = "Convertir caracteres"; visibility = View.GONE }
+    var autoPrevio = false
+    var autoAhora = false
+    var validando = false
+    fun validarProgramados(autoMarcar: Boolean) {
+        if (!haySmsProgramado) return
+        validando = true
+        val pPrevio = Envios.medir(Envios.mensaje(this, r, Envios.PREVIO, false, false))[0]
+        val pAhora = Envios.medir(Envios.mensaje(this, r, Envios.AHORA, false, false))[0]
+        if (autoMarcar) {
+            // Se dividirían: se marcan para omitir. Si después de convertir entran en 1 SMS, se desmarcan los auto-marcados.
+            if (pPrevio > 1 && !cbPrevio.isChecked) { cbPrevio.isChecked = true; autoPrevio = true }
+            if (pAhora > 1 && !cbAhora.isChecked) { cbAhora.isChecked = true; autoAhora = true }
+            if (pPrevio <= 1 && autoPrevio) { cbPrevio.isChecked = false; autoPrevio = false }
+            if (pAhora <= 1 && autoAhora) { cbAhora.isChecked = false; autoAhora = false }
+        }
+        cbTodos.isChecked = cbPrevio.isChecked && cbAhora.isChecked
+        fun etiqueta(p: Int, omitido: Boolean) = (if (p > 1) "⚠ Ocuparía $p SMS" else "Ocuparía 1 SMS") +
+            (if (omitido) " · se omitirá" else " · se enviará")
+        tvPrevio.text = etiqueta(pPrevio, cbPrevio.isChecked)
+        tvAhora.text = etiqueta(pAhora, cbAhora.isChecked)
+        val textoAhora = Envios.mensaje(this, r, Envios.AHORA, false, false)
+        val textoPrevio = Envios.mensaje(this, r, Envios.PREVIO, false, false)
+        btnConvertir.visibility = if ((pPrevio > 1 || pAhora > 1) &&
+            (Envios.convertible(textoAhora) || Envios.convertible(textoPrevio))) View.VISIBLE else View.GONE
+        validando = false
+    }
+    if (haySmsProgramado) {
+        caja.addView(subtitulo(c, "SMS programados"))
+        caja.addView(cbTodos)
+        caja.addView(cbPrevio); caja.addView(tvPrevio)
+        caja.addView(cbAhora); caja.addView(tvAhora)
+        caja.addView(btnConvertir)
+        // Cada cambio vuelve a validar el tamaño.
+        cbTodos.setOnClickListener { cbPrevio.isChecked = cbTodos.isChecked; cbAhora.isChecked = cbTodos.isChecked; validarProgramados(false) }
+        cbPrevio.setOnCheckedChangeListener { _, _ -> if (!validando) { autoPrevio = false; validarProgramados(false) } }
+        cbAhora.setOnCheckedChangeListener { _, _ -> if (!validando) { autoAhora = false; validarProgramados(false) } }
+        btnConvertir.setOnClickListener {
+            r.convertirSms = true
+            aviso("Caracteres convertidos para los SMS de este recordatorio")
+            validarProgramados(true)
+        }
+        validarProgramados(true)
+    }
+
     if (suspendidos) caja.addView(TextView(c).apply {
         text = "Envíos SMS se encuentran SUSPENDIDOS/ANULADOS"
         setTypeface(typeface, Typeface.BOLD)
@@ -672,11 +821,10 @@ fun Activity.confirmarAvisos(r: Recordatorio, motivo: String, omitirPorDefecto: 
 
     var decidido = false
     fun guardarAnulacion() {
-        if (r.sinSms != anular.isChecked) {
-            r.sinSms = anular.isChecked
-            Repositorio.guardar(this, r)
-            Registro.anotar(this, "#${r.id} SMS " + if (r.sinSms) "anulado" else "reactivado")
-        }
+        if (r.sinSms != anular.isChecked) Registro.anotar(this, "#${r.id} SMS " + if (anular.isChecked) "anulado" else "reactivado")
+        r.sinSms = anular.isChecked
+        if (haySmsProgramado) { r.omitirSmsPrevio = cbPrevio.isChecked; r.omitirSmsAhora = cbAhora.isChecked }
+        Repositorio.guardar(this, r)
     }
     fun enviar(lista: List<Contacto>) {
         decidido = true
@@ -684,11 +832,20 @@ fun Activity.confirmarAvisos(r: Recordatorio, motivo: String, omitirPorDefecto: 
         if (lista.isEmpty()) { aviso("No se eligió ningún contacto"); alTerminar(); return }
         val conSms = if (omitir.isChecked) emptyList() else lista.filter { Envios.usaSms(this, r, it) }
         if (omitir.isChecked && !anular.isChecked) Registro.anotar(this, "#${r.id} SMS omitido para este envío")
-        conSms.forEach { Envios.enviarSms(this, it, Envios.mensaje(this, r, motivo, false, false)) }
-        if (conSms.isNotEmpty()) aviso("SMS enviado a ${conSms.size} contacto(s)")
         val wa = lista.filter { it.modo.whatsapp }
-        if (wa.isNotEmpty()) startActivity(Envios.intentWhatsapp(this, r.id, motivo, false, wa.map { it.id }))
-        alTerminar()
+        val seguirConWhatsapp = {
+            if (wa.isNotEmpty()) startActivity(Envios.intentWhatsapp(this, r.id, motivo, false, wa.map { it.id }, anterior))
+            alTerminar()
+        }
+        if (conSms.isEmpty()) { seguirConWhatsapp(); return }
+        // Antes de enviar: si el SMS se divide en más de una parte, se pide confirmar, editar o no enviar.
+        controlarTamanioSms(Envios.mensaje(this, r, motivo, false, false, anterior), conSms.size) { texto ->
+            if (texto != null) {
+                conSms.forEach { Envios.enviarSms(this, it, texto) }
+                aviso("SMS enviado a ${conSms.size} contacto(s)")
+            } else Registro.anotar(this, "#${r.id} SMS no enviado (elegido por el usuario)")
+            seguirConWhatsapp()
+        }
     }
     AlertDialog.Builder(this, temaDialogo())
         .setTitle("Avisar a contactos")
@@ -696,13 +853,32 @@ fun Activity.confirmarAvisos(r: Recordatorio, motivo: String, omitirPorDefecto: 
         .setPositiveButton("Enviar a marcados") { _, _ -> enviar(checks.filter { it.second.isChecked }.map { it.first }) }
         .setNeutralButton("Enviar a Default") { _, _ -> enviar(activos.filter { it.porDefecto }) }
         .setNegativeButton("Abortar") { _, _ -> decidido = true; guardarAnulacion(); alTerminar() }
-        .setOnDismissListener { if (!decidido) alTerminar() }
+        .setOnDismissListener { if (!decidido) { guardarAnulacion(); alTerminar() } }
         .show()
 }
 
 /** Historial de cambios (ChangeLog). Se agrega una entrada con cada versión nueva. */
 object Cambios {
     private val versiones = listOf(
+        "2.3" to listOf(
+            "SMS: fecha corta «07/11/26 14:00» y «Original Vencido» sin llaves ni comillas.",
+            "Al guardar: validación del tamaño de los SMS programados; casillas «OMITIR SMS PROGRAMADOS», «Omitir SMS " +
+                "anticipatorio» y «Omitir SMS de la hora exacta» (se marcan solas si se dividirían).",
+            "Botón «Convertir caracteres» cuando un SMS ocuparía más de 1 SMS (quita tildes y símbolos que fuerzan Unicode)."
+        ),
+        "2.2.4" to listOf(
+            "SMS: «→» se reemplaza por «->» para ahorrar caracteres.",
+            "Antes de enviar un SMS que se dividiría en más de una parte: aviso con opción de enviar igual, editarlo o no enviarlo.",
+            "El SMS de prueba muestra cuántos SMS ocupa."
+        ),
+        "2.2.3" to listOf(
+            "Ajustes: «Tachado en SMS (experimental)», desactivado por defecto, y «Enviar SMS de prueba» con confirmación."
+        ),
+        "2.2.2" to listOf("WhatsApp: «Antes: [fecha anterior]» se muestra tachado."),
+        "2.2.1" to listOf(
+            "Campo {estado}: «Antes: … → Nueva Fecha/Hora: …» al cambiar fecha u hora, «Comienza en 15 minutos», " +
+                "«Es ahora» y {\"Original Vencido\"} si fue pospuesto."
+        ),
         "2.2" to listOf(
             "Textos de aviso: se respetan las líneas vacías o con espacios.",
             "Secciones nuevas: Cumplidos (con subsección Vencidos) y Archivados; secciones y subsecciones colapsables.",
@@ -867,4 +1043,120 @@ object Agenda {
                 "${android.provider.ContactsContract.RawContacts.ACCOUNT_TYPE} IN ('com.whatsapp', 'com.whatsapp.w4b')",
             arrayOf(idContacto.toString()), null)?.use { it.count > 0 } ?: false
     }.getOrDefault(false)
+}
+
+/** Envía un SMS real de prueba (con confirmación) para ver cómo llega el tachado. */
+fun Activity.enviarSmsPrueba() {
+    if (checkSelfPermission(Manifest.permission.SEND_SMS) != PackageManager.PERMISSION_GRANTED) {
+        requestPermissions(arrayOf(Manifest.permission.SEND_SMS), 4)
+        aviso("Concedé el permiso de SMS y volvé a tocar «Enviar SMS de prueba»")
+        return
+    }
+    val lista = Contactos.todos(this).filter { it.numero.isNotBlank() }
+    if (lista.isEmpty()) { aviso("Primero agregá tu número como contacto"); return }
+    val ahora = System.currentTimeMillis()
+    val antes = "Antes: ${Formato.completo(ahora)}"
+    val texto = "Prueba de la app Recordatorios\n" +
+        (if (Contactos.tachadoSms) Envios.tacharUnicode(antes) else antes) +
+        " -> Nueva Fecha/Hora: ${Formato.completo(ahora + 3_600_000)}\n" +
+        "Tachado en SMS: " + if (Contactos.tachadoSms) "ACTIVADO" else "desactivado"
+    AlertDialog.Builder(this, temaDialogo())
+        .setTitle("¿A qué número enviar la prueba?")
+        .setItems(lista.map { "${it.etiqueta} (${it.numero})" }.toTypedArray()) { _, i ->
+            val c = lista[i]
+            AlertDialog.Builder(this, temaDialogo())
+                .setTitle("Confirmar envío real")
+                .setMessage("Se enviará un SMS REAL a ${c.etiqueta} (${c.numero}). Puede tener costo según tu plan.\n\n" +
+                    "Tamaño: ${Envios.descripcionTamanio(texto)}\n\nTexto:\n$texto")
+                .setPositiveButton("Enviar") { _, _ ->
+                    Envios.enviarSms(this, c, texto)
+                    aviso("SMS de prueba enviado a ${c.etiqueta}. Revisá el registro de eventos si no llega.")
+                }
+                .setNegativeButton("Cancelar", null)
+                .show()
+        }
+        .setNegativeButton("Cancelar", null)
+        .show()
+}
+
+/**
+ * Si el SMS ocupa más de una parte, muestra el aviso: Enviar igual / Editar SMS / No enviar SMS.
+ * [alDecidir] recibe el texto a enviar, o null si no se envía.
+ */
+fun Activity.controlarTamanioSms(texto: String, destinatarios: Int, alDecidir: (String?) -> Unit) {
+    val partes = Envios.medir(texto)[0]
+    if (partes <= 1) { alDecidir(texto); return }
+    var decidido = false
+    val c = ContextThemeWrapper(this, temaDialogo())
+    val m = (20 * resources.displayMetrics.density).toInt()
+    val caja = LinearLayout(c).apply {
+        orientation = LinearLayout.VERTICAL
+        setPadding(m, m / 2, m, 0)
+        addView(TextView(c).apply {
+            text = "Tamaño: ${Envios.descripcionTamanio(texto)}\n" +
+                "Destinatarios por SMS: $destinatarios (cada uno recibe $partes SMS).\n\nTexto:\n$texto"
+        })
+    }
+    var dialogo: AlertDialog? = null
+    if (Envios.convertible(texto)) caja.addView(android.widget.Button(c).apply {
+        text = "Convertir caracteres"
+        setOnClickListener {
+            decidido = true
+            dialogo?.dismiss()
+            controlarTamanioSms(Envios.convertirGsm(texto), destinatarios, alDecidir)   // vuelve a validar
+        }
+    })
+    dialogo = AlertDialog.Builder(this, temaDialogo())
+        .setTitle("El SMS se dividiría en $partes partes")
+        .setView(ScrollView(c).apply { addView(caja) })
+        .setPositiveButton("Enviar igual") { _, _ -> decidido = true; alDecidir(texto) }
+        .setNeutralButton("Editar SMS") { _, _ -> decidido = true; editarSms(texto, destinatarios, alDecidir) }
+        .setNegativeButton("No enviar SMS") { _, _ -> decidido = true; alDecidir(null) }
+        .setOnDismissListener { if (!decidido) alDecidir(null) }
+        .show()
+}
+
+/** Editor del SMS con contador en vivo de caracteres y cantidad de SMS. Solo afecta a este envío. */
+private fun Activity.editarSms(texto: String, destinatarios: Int, alDecidir: (String?) -> Unit) {
+    val c = ContextThemeWrapper(this, temaDialogo())
+    val m = (20 * resources.displayMetrics.density).toInt()
+    val contador = TextView(c).apply { textSize = 13f }
+    val campo = EditText(c).apply {
+        inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE or InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
+        minLines = 4
+        setText(texto)
+    }
+    fun refrescar() {
+        val t = campo.text.toString()
+        val partes = Envios.medir(t)[0]
+        contador.text = Envios.descripcionTamanio(t) + if (partes <= 1) "  ✓ entra en 1 SMS" else ""
+    }
+    campo.addTextChangedListener(object : android.text.TextWatcher {
+        override fun beforeTextChanged(s: CharSequence?, a: Int, b: Int, d: Int) {}
+        override fun onTextChanged(s: CharSequence?, a: Int, b: Int, d: Int) {}
+        override fun afterTextChanged(s: android.text.Editable?) = refrescar()
+    })
+    refrescar()
+    val caja = LinearLayout(c).apply {
+        orientation = LinearLayout.VERTICAL
+        setPadding(m, m / 2, m, 0)
+        addView(campo); addView(contador)
+        addView(TextView(c).apply {
+            text = "Solo cambia este envío; no modifica el texto del aviso en Ajustes."
+            textSize = 12f
+        })
+    }
+    var decidido = false
+    AlertDialog.Builder(this, temaDialogo())
+        .setTitle("Editar SMS")
+        .setView(ScrollView(c).apply { addView(caja) })
+        .setPositiveButton("Enviar") { _, _ ->
+            decidido = true
+            val nuevo = campo.text.toString()
+            if (nuevo.isBlank()) { aviso("El SMS quedó vacío: no se envía"); alDecidir(null) }
+            else controlarTamanioSms(nuevo, destinatarios, alDecidir)   // si sigue largo, vuelve a avisar
+        }
+        .setNegativeButton("No enviar SMS") { _, _ -> decidido = true; alDecidir(null) }
+        .setOnDismissListener { if (!decidido) alDecidir(null) }
+        .show()
 }

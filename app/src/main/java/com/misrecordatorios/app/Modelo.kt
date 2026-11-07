@@ -47,7 +47,10 @@ data class Recordatorio(
     var ocurrencia: Long = 0,       // fecha/hora de la ocurrencia cumplida
     var archivado: Boolean = false,
     var revisar: Boolean = false,   // se tocó "Hecho" en la notificación: falta confirmar el cumplimiento
-    var ultimaVez: Long = 0         // última vez que sonó por su fecha
+    var ultimaVez: Long = 0,        // última vez que sonó por su fecha
+    var omitirSmsPrevio: Boolean = false,  // no enviar el SMS anticipatorio (15 min antes)
+    var omitirSmsAhora: Boolean = false,   // no enviar el SMS de la hora exacta del evento
+    var convertirSms: Boolean = false      // en SMS, convertir caracteres que fuerzan Unicode
 ) {
     /** Cumplido después de su fecha/hora → subsección "Vencidos" de Cumplidos. */
     val cumplidoVencido get() = cumplido && cumplidoEn > ocurrencia
@@ -63,6 +66,7 @@ data class Recordatorio(
         .put("excl", JSONArray(excluidos.toList()))
         .put("cumpl", cumplido).put("cumplEn", cumplidoEn).put("ocurr_c", ocurrencia)
         .put("arch", archivado).put("revisar", revisar).put("ultVez", ultimaVez)
+        .put("omPrev", omitirSmsPrevio).put("omAhora", omitirSmsAhora).put("convSms", convertirSms)
         .apply { contactos?.let { put("contactos", JSONArray(it.toList())) } }
 
     companion object {
@@ -92,7 +96,10 @@ data class Recordatorio(
                 ocurrencia = o.optLong("ocurr_c", 0),
                 archivado = o.optBoolean("arch", false),
                 revisar = o.optBoolean("revisar", false),
-                ultimaVez = o.optLong("ultVez", 0)
+                ultimaVez = o.optLong("ultVez", 0),
+                omitirSmsPrevio = o.optBoolean("omPrev", false),
+                omitirSmsAhora = o.optBoolean("omAhora", false),
+                convertirSms = o.optBoolean("convSms", false)
             )
         }
     }
