@@ -72,6 +72,12 @@
             android:orientation="horizontal"
             android:visibility="gone" />
 
+        <LinearLayout
+            android:id="@+id/filaExtra"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical" />
+
         <CheckBox
             android:id="@+id/cbAlarma"
             android:layout_width="match_parent"
@@ -102,11 +108,25 @@
             android:text="Guardar" />
 
         <Button
+            android:id="@+id/btnReplicar"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="Replicar"
+            android:visibility="gone" />
+
+        <Button
             android:id="@+id/btnBorrar"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="8dp"
             android:text="Borrar"
             android:visibility="gone" />
+
+        <LinearLayout
+            android:id="@+id/listaAvisos"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical" />
     </LinearLayout>
 </ScrollView>

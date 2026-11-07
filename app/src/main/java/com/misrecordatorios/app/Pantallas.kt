@@ -280,6 +280,8 @@ class MainActivity : Activity() {
                 .setNegativeButton("Cancelar", null)
                 .show()
         }
+        findViewById<Button>(R.id.btnFiltro).setOnClickListener { elegirFiltro() }
+        findViewById<Button>(R.id.btnOrden).setOnClickListener { elegirOrden() }
         findViewById<Button>(R.id.btnMostrarNotas).setOnClickListener { guardarColapsadas(emptySet()); mostrarLista() }
         findViewById<Button>(R.id.btnOcultarNotas).setOnClickListener {
             val todos = Repositorio.todos(this)
@@ -367,13 +369,100 @@ class MainActivity : Activity() {
             agregarTitulo("No hay recordatorios. Tocá «Nuevo recordatorio» para crear uno.")
             return
         }
-        val proximos = todos.filter { it.activo }.sortedBy { it.proxima }
-        val pospuestos = todos.filter { it.pospuestoHasta > 0 }.sortedBy { it.pospuestoHasta }
-        val vencidos = todos.filter { !it.activo && it.pospuestoHasta == 0L }.sortedByDescending { it.proxima }
+        actualizarFiltroYOrden()
+        val rango = rangoFiltro()
+        val visibles = if (rango == null) todos else todos.filter { Calculo.ocurreEntre(it, rango.first, rango.second) }
+        if (visibles.isEmpty()) { agregarTitulo("No hay recordatorios para ese período."); return }
+        val proximos = ordenar(visibles.filter { it.activo }) { it.proxima }
+        val pospuestos = ordenar(visibles.filter { it.pospuestoHasta > 0 }) { it.pospuestoHasta }
+        val vencidos = ordenar(visibles.filter { !it.activo && it.pospuestoHasta == 0L }) { it.proxima }
         if (proximos.isNotEmpty() || pospuestos.isNotEmpty()) agregarTitulo("Próximos")
         proximos.forEach { agregarItem(it) }
         if (pospuestos.isNotEmpty()) { agregarTitulo("Pospuestos", sub = true); pospuestos.forEach { agregarItem(it, pospuesto = true) } }
         if (vencidos.isNotEmpty()) { agregarTitulo("Vencidos"); vencidos.forEach { agregarItem(it) } }
+    }
+
+    // ---------- Filtro por fechas y orden (se recuerdan) ----------
+    private fun vista() = getSharedPreferences("vista", MODE_PRIVATE)
+    private val FILTROS = listOf("todos" to "Todos", "hoy" to "Hoy", "manana" to "Mañana",
+        "semana" to "Próximos 7 días", "dia" to "Elegir día…")
+    private val ORDENES = listOf("fecha_asc" to "Fecha (más próxima primero)", "fecha_desc" to "Fecha (más lejana primero)",
+        "titulo_az" to "Título (A-Z)", "titulo_za" to "Título (Z-A)",
+        "nuevos" to "Creación (más nuevos primero)", "antiguos" to "Creación (más antiguos primero)")
+
+    /** Desde/hasta (en ms) del filtro elegido, o null si se ven todos. */
+    private fun rangoFiltro(): Pair<Long, Long>? {
+        val hoy = LocalDate.now()
+        val (desde, dias) = when (vista().getString("filtro", "todos")) {
+            "hoy" -> hoy to 1L
+            "manana" -> hoy.plusDays(1) to 1L
+            "semana" -> hoy to 7L
+            "dia" -> LocalDate.ofEpochDay(vista().getLong("filtro_dia", hoy.toEpochDay())) to 1L
+            else -> return null
+        }
+        val zona = java.time.ZoneId.systemDefault()
+        return desde.atStartOfDay(zona).toInstant().toEpochMilli() to
+            desde.plusDays(dias).atStartOfDay(zona).toInstant().toEpochMilli() - 1
+    }
+
+    private fun textoFiltro(): String {
+        val f = vista().getString("filtro", "todos")
+        return if (f == "dia") {
+            val d = LocalDate.ofEpochDay(vista().getLong("filtro_dia", LocalDate.now().toEpochDay()))
+            Formato.fecha(d.atStartOfDay(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli())
+        } else FILTROS.first { it.first == f }.second
+    }
+
+    private fun ordenar(l: List<Recordatorio>, fecha: (Recordatorio) -> Long): List<Recordatorio> =
+        when (vista().getString("orden", "fecha_asc")) {
+            "fecha_desc" -> l.sortedByDescending(fecha)
+            "titulo_az" -> l.sortedBy { it.titulo.lowercase() }
+            "titulo_za" -> l.sortedByDescending { it.titulo.lowercase() }
+            "nuevos" -> l.sortedByDescending { it.id }
+            "antiguos" -> l.sortedBy { it.id }
+            else -> l.sortedBy(fecha)
+        }
+
+    private fun actualizarFiltroYOrden() {
+        val f = vista().getString("filtro", "todos")
+        findViewById<Button>(R.id.btnFiltro).text = "Filtro: " + textoFiltro() + " ▾"
+        findViewById<Button>(R.id.btnOrden).text = "Orden ▾"
+        findViewById<TextView>(R.id.avisoFiltro).apply {
+            visibility = if (f == "todos") View.GONE else View.VISIBLE
+            text = "Mostrando solo: ${textoFiltro()} · tocá para ver todos"
+            setOnClickListener { vista().edit().putString("filtro", "todos").apply(); mostrarLista() }
+        }
+    }
+
+    private fun elegirFiltro() {
+        AlertDialog.Builder(this, temaDialogo())
+            .setTitle("Filtrar por fecha")
+            .setItems(FILTROS.map { it.second }.toTypedArray()) { _, i ->
+                val clave = FILTROS[i].first
+                if (clave == "dia") {
+                    val hoy = LocalDate.now()
+                    DatePickerDialog(this, temaDialogo(), { _, a, m, d ->
+                        vista().edit().putString("filtro", "dia").putLong("filtro_dia", LocalDate.of(a, m + 1, d).toEpochDay()).apply()
+                        mostrarLista()
+                    }, hoy.year, hoy.monthValue - 1, hoy.dayOfMonth).show()
+                } else {
+                    vista().edit().putString("filtro", clave).apply()
+                    mostrarLista()
+                }
+            }
+            .show()
+    }
+
+    private fun elegirOrden() {
+        val actual = ORDENES.indexOfFirst { it.first == vista().getString("orden", "fecha_asc") }
+        AlertDialog.Builder(this, temaDialogo())
+            .setTitle("Ordenar por")
+            .setSingleChoiceItems(ORDENES.map { it.second }.toTypedArray(), actual) { d, i ->
+                vista().edit().putString("orden", ORDENES[i].first).apply()
+                d.dismiss()
+                mostrarLista()
+            }
+            .show()
     }
 
     private fun agregarTitulo(texto: String, sub: Boolean = false) {
@@ -455,14 +544,30 @@ class MainActivity : Activity() {
         v.setOnClickListener {
             startActivity(Intent(this, EditarActivity::class.java).putExtra(Programador.EXTRA_ID, r.id))
         }
-        v.setOnLongClickListener { confirmarBorrado(r) { mostrarLista() }; true }
+        v.setOnLongClickListener {
+            AlertDialog.Builder(this, temaDialogo())
+                .setTitle(r.titulo)
+                .setItems(arrayOf("Editar", "Replicar", "Borrar")) { _, i ->
+                    when (i) {
+                        0 -> startActivity(Intent(this, EditarActivity::class.java).putExtra(Programador.EXTRA_ID, r.id))
+                        1 -> startActivity(Intent(this, EditarActivity::class.java).putExtra(EXTRA_REPLICAR, r.id))
+                        else -> confirmarBorrado(r) { mostrarLista() }
+                    }
+                }
+                .show()
+            true
+        }
         lista.addView(v)
     }
 }
 
 /** Crear o editar un recordatorio. */
+const val EXTRA_REPLICAR = "replicar"
+
+/** Crear, editar o replicar un recordatorio. */
 class EditarActivity : Activity() {
     private var original: Recordatorio? = null
+    private var replica = false
     private var fechaHora: ZonedDateTime = ZonedDateTime.now()
     private lateinit var etTitulo: EditText
     private lateinit var etNota: EditText
@@ -470,15 +575,77 @@ class EditarActivity : Activity() {
     private lateinit var btnHora: Button
     private lateinit var spRep: Spinner
     private lateinit var filaDias: LinearLayout
+    private lateinit var filaNSemana: LinearLayout
+    private lateinit var spOrdinal: Spinner
+    private lateinit var spDiaSemana: Spinner
+    private lateinit var filaTerminar: LinearLayout
+    private lateinit var spTerminar: Spinner
+    private lateinit var etVeces: EditText
+    private lateinit var tvVeces: TextView
     private lateinit var cbAlarma: CheckBox
     private lateinit var btnContactos: Button
+    private lateinit var listaAvisos: LinearLayout
     private val seleccion = mutableSetOf<Int>()
+    private val excluidos = mutableSetOf<Int>()
+    private val checks = mutableListOf<CheckBox>()
 
     private fun actualizarContactos() {
         val activos = Contactos.activos(this).map { it.id }.toSet()
-        btnContactos.text = "Contactos a avisar (${seleccion.count { it in activos }})"
+        btnContactos.text = "Contactos a avisar (${seleccion.count { it in activos && it !in excluidos }})"
+        armarListaAvisos()
     }
-    private val checks = mutableListOf<CheckBox>()
+
+    /** Lista de contactos de avisos debajo de "Borrar": casilla = recibe avisos; "Eliminar" lo quita de la lista. */
+    private fun armarListaAvisos() {
+        listaAvisos.removeAllViews()
+        val todos = Contactos.todos(this).associateBy { it.id }
+        val activos = Contactos.activos(this).map { it.id }.toSet()
+        val enLista = seleccion.mapNotNull { todos[it] }
+        listaAvisos.addView(TextView(this).apply {
+            text = "Contactos de avisos de este recordatorio"
+            setTypeface(typeface, android.graphics.Typeface.BOLD)
+            setPadding(0, 24, 0, 4)
+        })
+        if (enLista.isEmpty()) {
+            listaAvisos.addView(TextView(this).apply { text = "Sin contactos. Agregalos con «Contactos a avisar»." })
+            return
+        }
+        listaAvisos.addView(TextView(this).apply {
+            text = "Desmarcado = queda en la lista pero no recibe avisos. Los cambios se aplican al Guardar."
+            textSize = 12f
+        })
+        enLista.forEach { c ->
+            listaAvisos.addView(LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                isBaselineAligned = false
+                gravity = android.view.Gravity.CENTER_VERTICAL
+                addView(CheckBox(this@EditarActivity).apply {
+                    text = "${c.etiqueta} — ${c.modo.texto}" + if (c.id !in activos) " (desactivado en Ajustes)" else ""
+                    isChecked = c.id !in excluidos
+                    setOnCheckedChangeListener { _, v ->
+                        if (v) excluidos -= c.id else excluidos += c.id
+                        val n = seleccion.count { it in activos && it !in excluidos }
+                        btnContactos.text = "Contactos a avisar ($n)"
+                    }
+                }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+                addView(Button(this@EditarActivity, null, android.R.attr.borderlessButtonStyle).apply {
+                    text = "Eliminar"
+                    setOnClickListener {
+                        AlertDialog.Builder(this@EditarActivity, temaDialogo())
+                            .setTitle("Eliminar de los avisos")
+                            .setMessage("¿Quitar definitivamente a «${c.etiqueta}» de la lista de avisos de este recordatorio?")
+                            .setPositiveButton("Eliminar") { _, _ -> seleccion -= c.id; excluidos -= c.id; actualizarContactos() }
+                            .setNegativeButton("Cancelar", null)
+                            .show()
+                    }
+                })
+            })
+        }
+    }
+
+    private fun spinner(opciones: List<String>) = Spinner(this).apply {
+        adapter = ArrayAdapter(this@EditarActivity, android.R.layout.simple_spinner_dropdown_item, opciones)
+    }
 
     override fun onCreate(estado: Bundle?) {
         super.onCreate(estado)
@@ -491,12 +658,49 @@ class EditarActivity : Activity() {
         filaDias = findViewById(R.id.filaDias)
         cbAlarma = findViewById(R.id.cbAlarma)
         btnContactos = findViewById(R.id.btnContactos)
+        listaAvisos = findViewById(R.id.listaAvisos)
+        val extra = findViewById<LinearLayout>(R.id.filaExtra)
         val btnBorrar = findViewById<Button>(R.id.btnBorrar)
+        val btnReplicar = findViewById<Button>(R.id.btnReplicar)
 
         listOf("L", "M", "X", "J", "V", "S", "D").forEachIndexed { i, letra ->
             val cb = CheckBox(this).apply { text = letra; tag = i + 1 }
             filaDias.addView(cb, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
             checks.add(cb)
+        }
+
+        // "El n.º [día] del mes"
+        spOrdinal = spinner(Formato.ORDINALES)
+        spDiaSemana = spinner(Formato.DIAS_SEMANA)
+        filaNSemana = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            addView(TextView(this@EditarActivity).apply { text = "El" })
+            addView(spOrdinal, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+            addView(spDiaSemana, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 2f))
+            gravity = android.view.Gravity.CENTER_VERTICAL
+        }
+        // Terminar: nunca / después de X veces
+        spTerminar = spinner(listOf("Nunca", "Después de X veces"))
+        etVeces = EditText(this).apply { hint = "X"; inputType = InputType.TYPE_CLASS_NUMBER; visibility = View.GONE }
+        tvVeces = TextView(this).apply { textSize = 12f; visibility = View.GONE }
+        filaTerminar = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            addView(LinearLayout(this@EditarActivity).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = android.view.Gravity.CENTER_VERTICAL
+                addView(TextView(this@EditarActivity).apply { text = "Terminar:" })
+                addView(spTerminar, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 2f))
+                addView(etVeces, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+            })
+            addView(tvVeces)
+        }
+        extra.addView(filaNSemana)
+        extra.addView(filaTerminar)
+        spTerminar.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(p: AdapterView<*>?, v: View?, pos: Int, id: Long) {
+                etVeces.visibility = if (pos == 1) View.VISIBLE else View.GONE
+            }
+            override fun onNothingSelected(p: AdapterView<*>?) {}
         }
 
         spRep.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item,
@@ -506,22 +710,41 @@ class EditarActivity : Activity() {
             override fun onNothingSelected(p: AdapterView<*>?) {}
         }
 
-        val id = intent.getIntExtra(Programador.EXTRA_ID, -1)
-        original = if (id >= 0) Repositorio.obtener(this, id) else null
+        val idEditar = intent.getIntExtra(Programador.EXTRA_ID, -1)
+        val idReplicar = intent.getIntExtra(EXTRA_REPLICAR, -1)
+        original = if (idEditar >= 0) Repositorio.obtener(this, idEditar) else null
+        val base = original ?: if (idReplicar >= 0) Repositorio.obtener(this, idReplicar) else null
+        replica = original == null && base != null
+        if (base != null) {
+            etTitulo.setText(base.titulo)
+            etNota.setText(base.nota)
+            fechaHora = Calculo.zdt(base.proxima)
+            if (replica) {
+                // Réplica: conserva fecha y hora si son futuras; si no, arranca en la hora actual.
+                if (base.proxima <= System.currentTimeMillis()) fechaHora = ZonedDateTime.now().withSecond(0).withNano(0)
+            } else if (!base.activo && fechaHora.toLocalDate().isBefore(LocalDate.now())) {
+                // Vencido de un día anterior: la fecha arranca en hoy.
+                fechaHora = ZonedDateTime.of(LocalDate.now(), fechaHora.toLocalTime(), fechaHora.zone)
+            }
+            spRep.setSelection(base.repeticion.ordinal)
+            checks.forEach { it.isChecked = (it.tag as Int) in base.dias }
+            spOrdinal.setSelection((base.semanaMes - 1).coerceIn(0, 4))
+            spDiaSemana.setSelection((base.diaSemana - 1).coerceIn(0, 6))
+            if (base.limite > 0) { spTerminar.setSelection(1); etVeces.setText(base.limite.toString()) }
+            cbAlarma.isChecked = base.alarma
+            seleccion += base.contactos ?: Contactos.defaults(this).map { it.id }
+            excluidos += base.excluidos
+        } else {
+            cbAlarma.isChecked = Ajustes.alarmaPorDefecto(this)
+            seleccion += Contactos.defaults(this).map { it.id }
+            fechaHora = ZonedDateTime.now().withSecond(0).withNano(0)
+            spOrdinal.setSelection(((fechaHora.dayOfMonth - 1) / 7).coerceAtMost(3))
+            spDiaSemana.setSelection(fechaHora.dayOfWeek.value - 1)
+        }
         val r = original
         if (r != null) {
             title = "Editar recordatorio"
-            etTitulo.setText(r.titulo)
-            etNota.setText(r.nota)
-            fechaHora = Calculo.zdt(r.proxima)
-            // Si es un vencido de un día anterior, la fecha arranca en hoy.
-            if (!r.activo && fechaHora.toLocalDate().isBefore(LocalDate.now())) {
-                fechaHora = ZonedDateTime.of(LocalDate.now(), fechaHora.toLocalTime(), fechaHora.zone)
-            }
-            spRep.setSelection(r.repeticion.ordinal)
-            checks.forEach { it.isChecked = (it.tag as Int) in r.dias }
-            cbAlarma.isChecked = r.alarma
-            seleccion += r.contactos ?: Contactos.defaults(this).map { it.id }
+            if (r.limite > 0) { tvVeces.text = "Ya sonó ${r.ocurrencias} de ${r.limite} veces."; tvVeces.visibility = View.VISIBLE }
             if (r.sinSms || r.historialSms.isNotEmpty()) findViewById<TextView>(R.id.tvSmsAnulado).apply {
                 visibility = View.VISIBLE
                 text = (if (r.sinSms) "SMS anulado para este recordatorio (solo WhatsApp). Para reactivarlo, " +
@@ -530,15 +753,17 @@ class EditarActivity : Activity() {
             }
             btnBorrar.visibility = View.VISIBLE
             btnBorrar.setOnClickListener { confirmarBorrado(r) { finish() } }
+            btnReplicar.visibility = View.VISIBLE
+            btnReplicar.setOnClickListener {
+                startActivity(Intent(this, EditarActivity::class.java).putExtra(EXTRA_REPLICAR, r.id))
+                finish()
+            }
         } else {
-            title = "Nuevo recordatorio"
-            cbAlarma.isChecked = Ajustes.alarmaPorDefecto(this)
-            seleccion += Contactos.defaults(this).map { it.id }
-            fechaHora = ZonedDateTime.now().withSecond(0).withNano(0)
+            title = if (replica) "Nuevo recordatorio (réplica)" else "Nuevo recordatorio"
         }
         actualizarBotones()
         actualizarContactos()
-        btnContactos.setOnClickListener { elegirContactos(seleccion) { actualizarContactos() } }
+        btnContactos.setOnClickListener { elegirContactos(seleccion) { excluidos.retainAll(seleccion); actualizarContactos() } }
 
         btnFecha.setOnClickListener {
             DatePickerDialog(this, { _, a, m, d ->
@@ -565,9 +790,12 @@ class EditarActivity : Activity() {
     }
 
     private fun actualizarDias() {
-        val semanal = repeticionElegida() == Repeticion.SEMANAL
+        val rep = repeticionElegida()
+        val semanal = rep == Repeticion.SEMANAL
         filaDias.visibility = if (semanal) View.VISIBLE else View.GONE
         if (semanal && checks.none { it.isChecked }) checks[fechaHora.dayOfWeek.value - 1].isChecked = true
+        filaNSemana.visibility = if (rep == Repeticion.NSEMANA) View.VISIBLE else View.GONE
+        filaTerminar.visibility = if (rep == Repeticion.NINGUNA) View.GONE else View.VISIBLE
     }
 
     private fun aviso(texto: String) = Toast.makeText(this, texto, Toast.LENGTH_LONG).show()
@@ -578,12 +806,19 @@ class EditarActivity : Activity() {
         val rep = repeticionElegida()
         val dias = checks.filter { it.isChecked }.map { it.tag as Int }.toMutableSet()
         if (rep == Repeticion.SEMANAL && dias.isEmpty()) { aviso("Elegí al menos un día"); return }
+        var limite = 0
+        if (rep != Repeticion.NINGUNA && spTerminar.selectedItemPosition == 1) {
+            limite = etVeces.text.toString().toIntOrNull() ?: 0
+            if (limite < 1) { aviso("Indicá después de cuántas veces termina"); return }
+        }
         val ms = fechaHora.toInstant().toEpochMilli()
         val ahora = System.currentTimeMillis()
         if (rep == Repeticion.NINGUNA && ms <= ahora) { aviso("Elegí una fecha y hora futura"); return }
+        val o = original
+        val suspendidos = SuspensionSms.activa(this)
 
         val r = Recordatorio(
-            id = original?.id ?: Repositorio.nuevoId(this),
+            id = o?.id ?: Repositorio.nuevoId(this),
             titulo = titulo,
             nota = etNota.text.toString().trim(),
             proxima = ms,
@@ -593,11 +828,16 @@ class EditarActivity : Activity() {
             activo = true,
             alarma = cbAlarma.isChecked,
             contactos = seleccion.toMutableSet(),
-            sinSms = (original?.sinSms ?: false) || SuspensionSms.activa(this),
-            historialSms = (original?.historialSms ?: mutableListOf()).toMutableList().apply {
-                if (original == null && SuspensionSms.activa(this@EditarActivity))
-                    add("Creado con SMS suspendidos/anulados el ${Formato.completo(System.currentTimeMillis())}")
-            }
+            sinSms = (o?.sinSms ?: false) || suspendidos,
+            historialSms = (o?.historialSms ?: mutableListOf()).toMutableList().apply {
+                if (o == null && suspendidos) add("Creado con SMS suspendidos/anulados el ${Formato.completo(ahora)}")
+            },
+            semanaMes = spOrdinal.selectedItemPosition + 1,
+            diaSemana = spDiaSemana.selectedItemPosition + 1,
+            limite = limite,
+            // Si se reactiva un vencido, el conteo vuelve a cero.
+            ocurrencias = if (o != null && o.activo) o.ocurrencias else 0,
+            excluidos = excluidos.filter { it in seleccion }.toMutableSet()
         )
         Calculo.ajustarInicio(r, ahora)
         // Cancela las alarmas anteriores (incluida una posposición pendiente). La notificación vieja
@@ -606,6 +846,6 @@ class EditarActivity : Activity() {
         Repositorio.guardar(this, r)
         Programador.programar(this, r)
         aviso("Guardado para el " + Formato.completo(r.proxima))
-        confirmarAvisos(r, if (original == null) Envios.NUEVO else Envios.EDITADO) { finish() }
+        confirmarAvisos(r, if (o == null) Envios.NUEVO else Envios.EDITADO) { finish() }
     }
 }

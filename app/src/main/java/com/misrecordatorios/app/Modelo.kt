@@ -14,7 +14,9 @@ enum class Repeticion(val codigo: String, val etiqueta: String) {
     NINGUNA("N", "No se repite"),
     DIARIA("D", "Todos los días"),
     SEMANAL("S", "Semanal"),
-    MENSUAL("M", "Mensual");
+    MENSUAL("M", "El día NN de cada mes"),
+    NSEMANA("P", "El n.º día de la semana del mes"),
+    ANUAL("A", "Anual");
 
     companion object {
         fun desdeCodigo(c: String) = entries.firstOrNull { it.codigo == c } ?: NINGUNA
@@ -34,7 +36,12 @@ data class Recordatorio(
     var pospuestoHasta: Long = 0,   // > 0 = hay una posposición pendiente (sobrevive a reinicios)
     var contactos: MutableSet<Int>? = null,  // contactos a avisar; null = grupo Default
     var sinSms: Boolean = false,    // "Anular envío de SMS" para este recordatorio
-    var historialSms: MutableList<String> = mutableListOf()   // suspensiones/reanudaciones masivas
+    var historialSms: MutableList<String> = mutableListOf(),  // suspensiones/reanudaciones masivas
+    var semanaMes: Int = 1,         // "El n.º …": 1 a 4, 5 = último
+    var diaSemana: Int = 1,         // "El n.º …": 1 = lunes … 7 = domingo
+    var limite: Int = 0,            // terminar después de X veces (0 = nunca)
+    var ocurrencias: Int = 0,       // veces que ya sonó por su fecha (las posposiciones no cuentan)
+    var excluidos: MutableSet<Int> = mutableSetOf()  // contactos a la vista pero sin recibir avisos
 ) {
     fun aJson(): JSONObject = JSONObject()
         .put("id", id).put("titulo", titulo).put("nota", nota)
@@ -43,6 +50,9 @@ data class Recordatorio(
         .put("activo", activo).put("alarma", alarma).put("posp", pospuestoHasta)
         .put("sinSms", sinSms)
         .put("histSms", JSONArray(historialSms))
+        .put("semMes", semanaMes).put("diaSem", diaSemana)
+        .put("limite", limite).put("ocurr", ocurrencias)
+        .put("excl", JSONArray(excluidos.toList()))
         .apply { contactos?.let { put("contactos", JSONArray(it.toList())) } }
 
     companion object {
@@ -61,7 +71,12 @@ data class Recordatorio(
                 pospuestoHasta = o.optLong("posp", 0),
                 contactos = o.optJSONArray("contactos")?.let { a -> MutableList(a.length()) { a.getInt(it) }.toMutableSet() },
                 sinSms = o.optBoolean("sinSms", false),
-                historialSms = o.optJSONArray("histSms")?.let { a -> MutableList(a.length()) { a.getString(it) } } ?: mutableListOf()
+                historialSms = o.optJSONArray("histSms")?.let { a -> MutableList(a.length()) { a.getString(it) } } ?: mutableListOf(),
+                semanaMes = o.optInt("semMes", 1),
+                diaSemana = o.optInt("diaSem", 1),
+                limite = o.optInt("limite", 0),
+                ocurrencias = o.optInt("ocurr", 0),
+                excluidos = o.optJSONArray("excl")?.let { a -> MutableList(a.length()) { a.getInt(it) }.toMutableSet() } ?: mutableSetOf()
             )
         }
     }
@@ -199,8 +214,45 @@ object Calculo {
                     t = mes.atDay(dia).atTime(base.toLocalTime()).atZone(zona())
                 } while (ms(t) <= despuesDe)
             }
+            Repeticion.NSEMANA -> {
+                var mes = YearMonth.from(base)
+                do {
+                    mes = mes.plusMonths(1)
+                    t = nEsimo(mes, r.semanaMes, r.diaSemana).atTime(base.toLocalTime()).atZone(zona())
+                } while (ms(t) <= despuesDe)
+            }
+            Repeticion.ANUAL -> {
+                var anio = base.year
+                do {
+                    anio++
+                    val mes = YearMonth.of(anio, base.monthValue)
+                    t = mes.atDay(min(r.diaMes, mes.lengthOfMonth())).atTime(base.toLocalTime()).atZone(zona())
+                } while (ms(t) <= despuesDe)
+            }
         }
         return ms(t)
+    }
+
+    /** "El n.º [día] del mes": n de 1 a 4, o 5 = último. */
+    fun nEsimo(mes: YearMonth, n: Int, diaSemana: Int): java.time.LocalDate {
+        val dow = java.time.DayOfWeek.of(diaSemana)
+        return if (n >= 5) mes.atEndOfMonth().with(java.time.temporal.TemporalAdjusters.lastInMonth(dow))
+               else mes.atDay(1).with(java.time.temporal.TemporalAdjusters.dayOfWeekInMonth(n, dow))
+    }
+
+    /** ¿Suena (o sonó) en algún momento entre [desde] y [hasta]? Considera las repeticiones. */
+    fun ocurreEntre(r: Recordatorio, desde: Long, hasta: Long): Boolean {
+        if (r.pospuestoHasta in desde..hasta) return true
+        if (!r.activo) return r.proxima in desde..hasta
+        var t = r.proxima
+        var restantes = if (r.limite > 0) r.limite - r.ocurrencias else Int.MAX_VALUE
+        var vueltas = 0
+        while (t <= hasta && restantes > 0 && vueltas < 1000) {
+            if (t >= desde) return true
+            t = siguiente(r.copy(proxima = t), t) ?: return false
+            restantes--; vueltas++
+        }
+        return false
     }
 
     /** Al guardar: ubica la primera ocurrencia válida (día elegido y en el futuro). */
@@ -209,6 +261,12 @@ object Calculo {
             var t = zdt(r.proxima)
             while (t.dayOfWeek.value !in r.dias) t = t.plusDays(1)
             r.proxima = ms(t)
+        }
+        if (r.repeticion == Repeticion.NSEMANA) {
+            // Primera vez: el n.º día elegido del mes de la fecha elegida (o del mes siguiente si ya pasó).
+            val base = zdt(r.proxima)
+            val fecha = nEsimo(YearMonth.from(base), r.semanaMes, r.diaSemana)
+            r.proxima = ms(fecha.atTime(base.toLocalTime()).atZone(zona()))
         }
         if (r.repeticion != Repeticion.NINGUNA && r.proxima <= ahora) {
             siguiente(r, ahora)?.let { r.proxima = it }

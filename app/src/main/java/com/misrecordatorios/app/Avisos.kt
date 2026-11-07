@@ -115,7 +115,9 @@ object Programador {
 
     /** Después de sonar: calcula la próxima vez o lo marca como vencido. */
     fun avanzar(ctx: Context, r: Recordatorio) {
-        val siguiente = Calculo.siguiente(r, System.currentTimeMillis())
+        r.ocurrencias++
+        val siguiente = if (r.limite > 0 && r.ocurrencias >= r.limite) null   // llegó a la cantidad de veces
+                        else Calculo.siguiente(r, System.currentTimeMillis())
         if (siguiente == null) r.activo = false else r.proxima = siguiente
         Repositorio.guardar(ctx, r)
         programar(ctx, r)
@@ -363,6 +365,10 @@ object Formato {
     private val fCompleto = DateTimeFormatter.ofPattern("EEE d MMM, HH:mm", loc)
     private val dias = listOf("lun", "mar", "mié", "jue", "vie", "sáb", "dom")
 
+    val ORDINALES = listOf("1.º", "2.º", "3.º", "4.º", "último")
+    val DIAS_SEMANA = listOf("lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo")
+    fun textoNSemana(n: Int, dia: Int) = "El ${ORDINALES[(n - 1).coerceIn(0, 4)]} ${DIAS_SEMANA[(dia - 1).coerceIn(0, 6)]} de cada mes"
+
     fun fecha(ms: Long): String = Calculo.zdt(ms).format(fFecha)
     fun hora(ms: Long): String = Calculo.zdt(ms).format(fHora)
     fun completo(ms: Long): String = Calculo.zdt(ms).format(fCompleto)
@@ -372,9 +378,12 @@ object Formato {
             Repeticion.NINGUNA -> ""
             Repeticion.DIARIA -> " · Todos los días"
             Repeticion.SEMANAL -> " · " + r.dias.sorted().joinToString(", ") { dias[it - 1] }
-            Repeticion.MENSUAL -> " · Mensual (día ${r.diaMes})"
+            Repeticion.MENSUAL -> " · El día ${r.diaMes} de cada mes"
+            Repeticion.NSEMANA -> " · " + textoNSemana(r.semanaMes, r.diaSemana)
+            Repeticion.ANUAL -> " · Anual (" + Calculo.zdt(r.proxima).format(DateTimeFormatter.ofPattern("d 'de' MMMM", loc)) + ")"
         }
-        return (if (r.activo) "" else "Vencido: ") + completo(r.proxima) + rep +
+        val veces = if (r.limite > 0 && r.repeticion != Repeticion.NINGUNA) " · ${r.ocurrencias}/${r.limite} veces" else ""
+        return (if (r.activo) "" else "Vencido: ") + completo(r.proxima) + rep + veces +
             (if (r.alarma) " · Alarma" else "") + (if (r.sinSms) " · SMS anulado" else "")
     }
 }

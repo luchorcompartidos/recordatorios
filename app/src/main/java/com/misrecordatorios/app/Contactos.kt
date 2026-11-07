@@ -169,7 +169,7 @@ object Envios {
     /** Contactos elegidos para el recordatorio (si nunca se eligieron: el grupo Default). */
     fun destinatarios(ctx: Context, r: Recordatorio): List<Contacto> {
         val sel = r.contactos ?: Contactos.defaults(ctx).map { it.id }.toSet()
-        return Contactos.activos(ctx).filter { it.id in sel }
+        return Contactos.activos(ctx).filter { it.id in sel && it.id !in r.excluidos }
     }
 
     fun usaSms(ctx: Context, r: Recordatorio, c: Contacto) =
@@ -672,6 +672,13 @@ fun Activity.confirmarAvisos(r: Recordatorio, motivo: String, alTerminar: () -> 
 /** Historial de cambios (ChangeLog). Se agrega una entrada con cada versión nueva. */
 object Cambios {
     private val versiones = listOf(
+        "2.0" to listOf(
+            "Replicar recordatorios (botón en la edición y en el menú al mantener presionado en la lista).",
+            "Repeticiones nuevas: Anual y «El 1.º/2.º/3.º/4.º/último [día] del mes»; «Mensual» pasa a llamarse «El día NN de cada mes».",
+            "Terminar después de X veces (las posposiciones no cuentan).",
+            "Lista: filtro por fecha (Hoy, Mañana, Próximos 7 días o un día elegido) y orden por fecha, título o creación.",
+            "En cada recordatorio: lista de contactos de avisos con casilla (desmarcado = sin avisos) y opción Eliminar con confirmación."
+        ),
         "1.9" to listOf(
             "Contactos: botón «Validar en WA y recuperar» (busca el número en la agenda, trae el nombre e indica si tiene WhatsApp).",
             "La copia de seguridad guarda también los últimos valores de «Personalizado» y la fecha del respaldo de SMS."
