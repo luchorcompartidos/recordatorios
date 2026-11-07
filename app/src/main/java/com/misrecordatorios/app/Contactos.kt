@@ -168,8 +168,10 @@ object Envios {
     fun estado(r: Recordatorio, motivo: String, pospuesto: Boolean, anterior: Long, whatsapp: Boolean = false): String = when {
         // En SMS, sin llaves ni comillas (las llaves cuentan doble).
         pospuesto -> if (whatsapp) "{\"Original Vencido\"}" else "Original Vencido"
+        // SMS: solo la marca, porque {hora} ya muestra la fecha nueva.
+        motivo == EDITADO && anterior > 0 && anterior != r.proxima && !whatsapp -> "NUEVA Fecha/Hora"
         motivo == EDITADO && anterior > 0 && anterior != r.proxima -> {
-            val f: (Long) -> String = if (whatsapp) Formato::completo else Formato::sms
+            val f: (Long) -> String = Formato::completo
             val antes = "Antes: ${f(anterior)}"
             // En WhatsApp, ~texto~ se ve tachado (dato desestimado). En SMS no hay formato.
             val tachado = when {
@@ -879,6 +881,12 @@ fun Activity.confirmarAvisos(r: Recordatorio, motivo: String, omitirPorDefecto: 
 /** Historial de cambios (ChangeLog). Se agrega una entrada con cada versión nueva. */
 object Cambios {
     private val versiones = listOf(
+        "2.4" to listOf(
+            "Pestañas «Pendientes (nn)» y «Recordatorios». Pendientes: carga con Título y Nota; «Crear Recordatorio» " +
+                "abre uno nuevo con esos datos y elimina el pendiente al guardarlo.",
+            "Encabezado reordenado: franja de SMS, Secciones/Subsecciones, botón único Mostrar/Ocultar notas, Filtro y Orden.",
+            "SMS: al cambiar fecha u hora, {estado} muestra «NUEVA Fecha/Hora»."
+        ),
         "2.3.1" to listOf(
             "Corrección: «Convertir caracteres» ahora convierte viñetas (•) y otros símbolos comunes.",
             "El tamaño del SMS indica qué caracteres siguen forzando Unicode."

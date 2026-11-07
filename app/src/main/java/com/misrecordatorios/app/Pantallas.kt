@@ -307,12 +307,17 @@ class MainActivity : Activity() {
         findViewById<Button>(R.id.btnAcciones).setOnClickListener { accionesSeleccion() }
         findViewById<Button>(R.id.btnCancelarSeleccion).setOnClickListener { salirSeleccion() }
         findViewById<Button>(R.id.btnOrden).setOnClickListener { elegirOrden() }
-        findViewById<Button>(R.id.btnMostrarNotas).setOnClickListener { guardarColapsadas(emptySet()); mostrarLista() }
-        findViewById<Button>(R.id.btnOcultarNotas).setOnClickListener {
-            val todos = Repositorio.todos(this)
-            guardarColapsadas(todos.filter { textoNota(it, it.pospuestoHasta > 0).isNotEmpty() }.map { it.id.toString() }.toSet())
-            expandidas.clear()
+        // Un solo control de notas: la etiqueta muestra la acción que se va a ejecutar.
+        findViewById<Button>(R.id.btnNotas).setOnClickListener {
+            if (todasNotasOcultas()) guardarColapsadas(emptySet())
+            else { guardarColapsadas(idsConNota()); expandidas.clear() }
             mostrarLista()
+        }
+        // Pestañas
+        findViewById<View>(R.id.tabPendientes).setOnClickListener { elegirPestania("pendientes") }
+        findViewById<View>(R.id.tabRecordatorios).setOnClickListener { elegirPestania("recordatorios") }
+        findViewById<Button>(R.id.btnNuevoPendiente).setOnClickListener {
+            startActivity(Intent(this, PendienteActivity::class.java))
         }
         aviso = findViewById(R.id.aviso)
         findViewById<Button>(R.id.btnNuevo).setOnClickListener {
@@ -350,6 +355,8 @@ class MainActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
+        mostrarPendientes()
+        actualizarPestanias()
         actualizarSms()
         revisarPermisos()
         mostrarLista()
@@ -421,6 +428,7 @@ class MainActivity : Activity() {
         }
         if (seccion("archivados", "Archivados", archivados.size)) archivados.forEach { agregarItem(it) }
         actualizarSeleccion()
+        findViewById<Button>(R.id.btnNotas).text = if (todasNotasOcultas()) "Mostrar notas" else "Ocultar notas"
     }
 
     // ---------- Filtro por fechas y orden (se recuerdan) ----------
@@ -466,8 +474,8 @@ class MainActivity : Activity() {
 
     private fun actualizarFiltroYOrden() {
         val f = vista().getString("filtro", "todos")
-        findViewById<Button>(R.id.btnFiltro).text = "Filtro: " + textoFiltro() + " ▾"
-        findViewById<Button>(R.id.btnOrden).text = "Orden ▾"
+        findViewById<Button>(R.id.btnFiltro).text = "⏷ Filtro: " + textoFiltro()
+        findViewById<Button>(R.id.btnOrden).text = "⇅ Orden"
         findViewById<TextView>(R.id.avisoFiltro).apply {
             visibility = if (f == "todos") View.GONE else View.VISIBLE
             text = "Mostrando solo: ${textoFiltro()} · tocá para ver todos"
@@ -505,6 +513,57 @@ class MainActivity : Activity() {
             }
             .show()
     }
+
+    // ---------- Pestañas ----------
+    private fun elegirPestania(p: String) {
+        vista().edit().putString("pestania", p).apply()
+        actualizarPestanias()
+    }
+
+    private fun actualizarPestanias() {
+        val enPendientes = vista().getString("pestania", "recordatorios") == "pendientes"
+        findViewById<View>(R.id.panelPendientes).visibility = if (enPendientes) View.VISIBLE else View.GONE
+        findViewById<View>(R.id.panelRecordatorios).visibility = if (enPendientes) View.GONE else View.VISIBLE
+        findViewById<View>(R.id.indPendientes).visibility = if (enPendientes) View.VISIBLE else View.INVISIBLE
+        findViewById<View>(R.id.indRecordatorios).visibility = if (enPendientes) View.INVISIBLE else View.VISIBLE
+        findViewById<TextView>(R.id.tvTabPendientes).apply {
+            text = "Pendientes (${Pendientes.todos(this@MainActivity).size})"
+            alpha = if (enPendientes) 1f else 0.7f
+        }
+        findViewById<TextView>(R.id.tvTabRecordatorios).apply {
+            // Solo muestra la cantidad cuando no hay ninguno: "(0)".
+            text = if (Repositorio.todos(this@MainActivity).isEmpty()) "Recordatorios (0)" else "Recordatorios"
+            alpha = if (enPendientes) 0.7f else 1f
+        }
+    }
+
+    private fun mostrarPendientes() {
+        val cont = findViewById<LinearLayout>(R.id.listaPendientes)
+        cont.removeAllViews()
+        val lista = Pendientes.todos(this).sortedByDescending { it.creado }
+        if (lista.isEmpty()) {
+            cont.addView(TextView(this).apply {
+                text = "No hay pendientes. Tocá «Carga de \"Pendiente\"» para agregar uno."
+                setPadding(24, 32, 24, 0)
+            })
+        }
+        lista.forEach { p ->
+            val v = layoutInflater.inflate(R.layout.item_recordatorio, cont, false)
+            v.findViewById<TextView>(R.id.titulo).text = p.titulo
+            v.findViewById<TextView>(R.id.detalle).text = "Cargado el " + Formato.completo(p.creado)
+            if (p.nota.isNotBlank()) v.findViewById<TextView>(R.id.nota).apply { text = p.nota; visibility = View.VISIBLE }
+            v.setOnClickListener {
+                startActivity(Intent(this, PendienteActivity::class.java).putExtra(Pendientes.EXTRA_PEND_ID, p.id))
+            }
+            v.setOnLongClickListener { confirmarBorrarPendiente(p) { mostrarPendientes(); actualizarPestanias() }; true }
+            cont.addView(v)
+        }
+    }
+
+    // ---------- Notas (control único) ----------
+    private fun idsConNota(): Set<String> = Repositorio.todos(this)
+        .filter { textoNota(it, it.pospuestoHasta > 0).isNotEmpty() }.map { it.id.toString() }.toSet()
+    private fun todasNotasOcultas(): Boolean { val ids = idsConNota(); return ids.isNotEmpty() && colapsadas().containsAll(ids) }
 
     // ---------- Secciones colapsables ----------
     private val SECCIONES = listOf("proximos", "vencidos", "cumplidos", "archivados")
@@ -707,6 +766,7 @@ const val EXTRA_REPLICAR = "replicar"
 class EditarActivity : Activity() {
     private var original: Recordatorio? = null
     private var replica = false
+    private var pendienteOrigen = -1   // si viene de la pestaña Pendientes, se elimina de ahí al guardar
     private var fechaHora: ZonedDateTime = ZonedDateTime.now()
     private lateinit var etTitulo: EditText
     private lateinit var etNota: EditText
@@ -905,6 +965,7 @@ class EditarActivity : Activity() {
         val idReplicar = intent.getIntExtra(EXTRA_REPLICAR, -1)
         original = if (idEditar >= 0) Repositorio.obtener(this, idEditar) else null
         val base = original ?: if (idReplicar >= 0) Repositorio.obtener(this, idReplicar) else null
+        pendienteOrigen = intent.getIntExtra(Pendientes.EXTRA_PEND_ID, -1)
         replica = original == null && base != null
         if (base != null) {
             etTitulo.setText(base.titulo)
@@ -962,6 +1023,11 @@ class EditarActivity : Activity() {
             }
         } else {
             title = if (replica) "Nuevo recordatorio (réplica)" else "Nuevo recordatorio"
+            if (pendienteOrigen >= 0 && estado == null) {
+                title = "Nuevo recordatorio (desde Pendientes)"
+                etTitulo.setText(intent.getStringExtra(Pendientes.EXTRA_PEND_TITULO) ?: "")
+                etNota.setText(intent.getStringExtra(Pendientes.EXTRA_PEND_NOTA) ?: "")
+            }
         }
         msInicial = fechaHora.toInstant().toEpochMilli()
         // Si Android cerró la pantalla mientras estaba en segundo plano, se recupera lo que se estaba editando.
@@ -1075,6 +1141,8 @@ class EditarActivity : Activity() {
         Programador.cancelar(this, r.id)
         Repositorio.guardar(this, r)
         Programador.programar(this, r)
+        // Recordatorio creado desde Pendientes: el pendiente se elimina recién ahora, ya guardado.
+        if (o == null && pendienteOrigen >= 0) { Pendientes.borrar(this, pendienteOrigen); pendienteOrigen = -1 }
         aviso("Guardado para el " + Formato.completo(r.proxima))
         // "Omitir SMS para esta edición": marcado si no cambió la fecha, la hora ni la repetición.
         if (o != null && o.sinSms != r.sinSms) Registro.anotar(this, "#${r.id} SMS " + if (r.sinSms) "inactivo" else "activo")

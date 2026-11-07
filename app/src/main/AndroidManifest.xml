@@ -53,6 +53,11 @@
             android:taskAffinity="com.misrecordatorios.whatsapp" />
 
         <activity
+            android:name=".PendienteActivity"
+            android:exported="false"
+            android:windowSoftInputMode="adjustResize" />
+
+        <activity
             android:name=".AjustesActivity"
             android:exported="false" />
 

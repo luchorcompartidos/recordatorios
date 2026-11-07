@@ -122,6 +122,7 @@ object Copia {
         .put("datos", Repositorio.exportar(ctx))
         .put("ajustes", Ajustes.exportar(ctx))
         .put("contactos", Contactos.exportar(ctx))
+        .put("pendientes", Pendientes.exportar(ctx))
         .toString(1)
 
     /** Primera vez: crea la copia previa (si no existía) y la actual. */
@@ -156,6 +157,7 @@ object Copia {
         Repositorio.importar(ctx, obj.getJSONObject("datos"))
         obj.optJSONObject("ajustes")?.let { Ajustes.importar(ctx, it) }
         obj.optJSONObject("contactos")?.let { Contactos.importar(ctx, it) }
+        obj.optJSONArray("pendientes")?.let { Pendientes.importar(ctx, it) }
         marcarLista(ctx)
         Programador.reprogramarTodos(ctx, avisarPerdidos = false)
         Registro.anotar(ctx, "Restaurado desde $nombre")

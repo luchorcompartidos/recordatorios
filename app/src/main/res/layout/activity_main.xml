@@ -14,157 +14,274 @@
         android:textSize="15sp"
         android:visibility="gone" />
 
-    <TextView
-        android:id="@+id/avisoSms"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:background="#B3261E"
-        android:gravity="center"
-        android:padding="10dp"
-        android:text="Envíos SMS se encuentran SUSPENDIDOS/ANULADOS"
-        android:textColor="#FFFFFF"
-        android:textSize="15sp"
-        android:textStyle="bold"
-        android:visibility="gone" />
-
-    <Button
-        android:id="@+id/btnSms"
-        style="?android:attr/borderlessButtonStyle"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginHorizontal="12dp"
-        android:text="Suspender/Anular SMS" />
-
+    <!-- Pestañas: Pendientes (primera) y Recordatorios -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:orientation="horizontal"
-        android:paddingHorizontal="12dp">
-
-        <Button
-            android:id="@+id/btnFiltro"
-            style="?android:attr/borderlessButtonStyle"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1.4"
-            android:text="Filtro: Todos ▾" />
-
-        <Button
-            android:id="@+id/btnOrden"
-            style="?android:attr/borderlessButtonStyle"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:text="Orden ▾" />
-    </LinearLayout>
-
-    <TextView
-        android:id="@+id/avisoFiltro"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:background="?android:attr/colorAccent"
-        android:gravity="center"
-        android:padding="6dp"
-        android:textColor="#FFFFFF"
-        android:visibility="gone" />
-
-    <LinearLayout
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:orientation="horizontal"
-        android:paddingHorizontal="12dp"
-        android:paddingTop="4dp">
-
-        <Button
-            android:id="@+id/btnMostrarNotas"
-            style="?android:attr/borderlessButtonStyle"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:text="Mostrar notas" />
-
-        <Button
-            android:id="@+id/btnOcultarNotas"
-            style="?android:attr/borderlessButtonStyle"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:text="Ocultar notas" />
-    </LinearLayout>
-
-    <LinearLayout
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:orientation="horizontal"
-        android:paddingHorizontal="12dp">
-
-        <Button
-            android:id="@+id/btnSecciones"
-            style="?android:attr/borderlessButtonStyle"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:text="Secciones ▾" />
-
-        <Button
-            android:id="@+id/btnSubsecciones"
-            style="?android:attr/borderlessButtonStyle"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:text="Subsecciones ▾" />
-    </LinearLayout>
-
-    <LinearLayout
-        android:id="@+id/barraSeleccion"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:background="#333D7BFD"
-        android:gravity="center_vertical"
-        android:orientation="horizontal"
-        android:paddingHorizontal="12dp"
-        android:visibility="gone">
-
-        <TextView
-            android:id="@+id/tvSeleccion"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:textStyle="bold" />
-
-        <Button
-            android:id="@+id/btnAcciones"
-            style="?android:attr/borderlessButtonStyle"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="Acciones ▾" />
-
-        <Button
-            android:id="@+id/btnCancelarSeleccion"
-            style="?android:attr/borderlessButtonStyle"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="Cancelar" />
-    </LinearLayout>
-
-    <ScrollView
-        android:layout_width="match_parent"
-        android:layout_height="0dp"
-        android:layout_weight="1">
+        android:orientation="horizontal">
 
         <LinearLayout
-            android:id="@+id/lista"
+            android:id="@+id/tabPendientes"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:background="?android:attr/selectableItemBackground"
+            android:orientation="vertical">
+
+            <TextView
+                android:id="@+id/tvTabPendientes"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center"
+                android:paddingVertical="12dp"
+                android:text="Pendientes (0)"
+                android:textSize="15sp" />
+
+            <View
+                android:id="@+id/indPendientes"
+                android:layout_width="match_parent"
+                android:layout_height="3dp"
+                android:background="?android:attr/colorAccent" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/tabRecordatorios"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:background="?android:attr/selectableItemBackground"
+            android:orientation="vertical">
+
+            <TextView
+                android:id="@+id/tvTabRecordatorios"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center"
+                android:paddingVertical="12dp"
+                android:text="Recordatorios"
+                android:textSize="16sp"
+                android:textStyle="bold" />
+
+            <View
+                android:id="@+id/indRecordatorios"
+                android:layout_width="match_parent"
+                android:layout_height="3dp"
+                android:background="?android:attr/colorAccent" />
+        </LinearLayout>
+    </LinearLayout>
+
+    <!-- ===================== Pestaña PENDIENTES ===================== -->
+    <LinearLayout
+        android:id="@+id/panelPendientes"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:orientation="vertical"
+        android:visibility="gone">
+
+        <ScrollView
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1">
+
+            <LinearLayout
+                android:id="@+id/listaPendientes"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:padding="8dp" />
+        </ScrollView>
+
+        <Button
+            android:id="@+id/btnNuevoPendiente"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:orientation="vertical"
-            android:padding="8dp" />
-    </ScrollView>
+            android:layout_margin="16dp"
+            android:text="Carga de «Pendiente»"
+            android:textSize="16sp" />
+    </LinearLayout>
 
-    <Button
-        android:id="@+id/btnNuevo"
+    <!-- ===================== Pestaña RECORDATORIOS ===================== -->
+    <LinearLayout
+        android:id="@+id/panelRecordatorios"
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_margin="16dp"
-        android:text="+ Nuevo recordatorio"
-        android:textSize="16sp" />
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:orientation="vertical">
+
+        <!-- Franja independiente de SMS -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:background="#1E1E1E"
+            android:orientation="vertical">
+
+            <Button
+                android:id="@+id/btnSms"
+                style="?android:attr/borderlessButtonStyle"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Suspender/Anular SMS"
+                android:textColor="#FFD54F"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/avisoSms"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:background="#B3261E"
+                android:gravity="center"
+                android:padding="10dp"
+                android:text="Envíos SMS se encuentran SUSPENDIDOS/ANULADOS"
+                android:textColor="#FFFFFF"
+                android:textSize="15sp"
+                android:textStyle="bold"
+                android:visibility="gone" />
+        </LinearLayout>
+
+        <!-- Panel de vista: colapsar/expandir y notas -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:paddingHorizontal="12dp"
+            android:paddingTop="8dp">
+
+            <Button
+                android:id="@+id/btnSecciones"
+                android:layout_width="0dp"
+                android:layout_height="40dp"
+                android:layout_marginEnd="6dp"
+                android:layout_weight="1"
+                android:background="@drawable/boton_borde"
+                android:text="Secciones ▾"
+                android:textAllCaps="false" />
+
+            <Button
+                android:id="@+id/btnSubsecciones"
+                android:layout_width="0dp"
+                android:layout_height="40dp"
+                android:layout_marginStart="6dp"
+                android:layout_weight="1"
+                android:background="@drawable/boton_borde"
+                android:text="Subsecciones ▾"
+                android:textAllCaps="false" />
+        </LinearLayout>
+
+        <Button
+            android:id="@+id/btnNotas"
+            android:layout_width="match_parent"
+            android:layout_height="40dp"
+            android:layout_marginHorizontal="12dp"
+            android:layout_marginTop="8dp"
+            android:background="@drawable/boton_borde"
+            android:text="Ocultar notas"
+            android:textAllCaps="false" />
+
+        <!-- Divisoria sutil -->
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:layout_marginHorizontal="12dp"
+            android:layout_marginTop="10dp"
+            android:background="#33888888" />
+
+        <!-- Filtro y Orden -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:paddingHorizontal="12dp"
+            android:paddingVertical="8dp">
+
+            <Button
+                android:id="@+id/btnFiltro"
+                android:layout_width="0dp"
+                android:layout_height="40dp"
+                android:layout_marginEnd="6dp"
+                android:layout_weight="1.4"
+                android:background="@drawable/boton_tonal"
+                android:text="⏷ Filtro: Todos"
+                android:textAllCaps="false" />
+
+            <Button
+                android:id="@+id/btnOrden"
+                android:layout_width="0dp"
+                android:layout_height="40dp"
+                android:layout_marginStart="6dp"
+                android:layout_weight="1"
+                android:background="@drawable/boton_tonal"
+                android:text="⇅ Orden"
+                android:textAllCaps="false" />
+        </LinearLayout>
+
+        <TextView
+            android:id="@+id/avisoFiltro"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:background="?android:attr/colorAccent"
+            android:gravity="center"
+            android:padding="6dp"
+            android:textColor="#FFFFFF"
+            android:visibility="gone" />
+
+        <!-- Divisoria marcada: fin del encabezado -->
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="2dp"
+            android:background="#888888" />
+
+        <LinearLayout
+            android:id="@+id/barraSeleccion"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:background="#333D7BFD"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:paddingHorizontal="12dp"
+            android:visibility="gone">
+
+            <TextView
+                android:id="@+id/tvSeleccion"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:textStyle="bold" />
+
+            <Button
+                android:id="@+id/btnAcciones"
+                style="?android:attr/borderlessButtonStyle"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Acciones ▾" />
+
+            <Button
+                android:id="@+id/btnCancelarSeleccion"
+                style="?android:attr/borderlessButtonStyle"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Cancelar" />
+        </LinearLayout>
+
+        <ScrollView
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1">
+
+            <LinearLayout
+                android:id="@+id/lista"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:padding="8dp" />
+        </ScrollView>
+
+        <Button
+            android:id="@+id/btnNuevo"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_margin="16dp"
+            android:text="+ Nuevo recordatorio"
+            android:textSize="16sp" />
+    </LinearLayout>
 </LinearLayout>
