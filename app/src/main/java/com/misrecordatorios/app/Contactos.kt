@@ -229,6 +229,11 @@ object Envios {
                 "–", "—" -> "-"
                 "…" -> "..."
                 "→" -> "->"
+                "•", "·", "‣", "◦", "▪", "●" -> "-"   // viñetas
+                "º", "°" -> "o"
+                "ª" -> "a"
+                "´", "`" -> "'"
+                "\u00A0", "\t" -> " "   // espacio duro y tabulación
                 "\u0336" -> ""   // marca de tachado
                 else -> java.text.Normalizer.normalize(ch, java.text.Normalizer.Form.NFD)
                     .replace(Regex("\\p{M}+"), "")
@@ -237,6 +242,19 @@ object Envios {
                       else if (reemplazo.isEmpty()) "" else ch)
         }
         return sb.toString()
+    }
+
+    /** Caracteres que siguen forzando Unicode (para mostrarlos al usuario). */
+    fun caracteresUnicode(t: String): String {
+        val lista = mutableListOf<String>()
+        var i = 0
+        while (i < t.length) {
+            val cp = t.codePointAt(i)
+            val ch = String(Character.toChars(cp))
+            i += Character.charCount(cp)
+            if (!esGsm(ch) && ch !in lista) lista += ch
+        }
+        return lista.joinToString(" ")
     }
 
     /** ¿La conversión cambiaría el texto? */
@@ -250,7 +268,8 @@ object Envios {
         val m = medir(t)
         val unicode = m[3] == android.telephony.SmsMessage.ENCODING_16BIT
         val cod = if (unicode) "Unicode (70 por SMS; 67 si se divide)" else "estándar (160 por SMS; 153 si se divide)"
-        return "${m[0]} SMS · ${t.length} caracteres · codificación $cod"
+        val causa = if (unicode) "\nFuerzan Unicode: " + caracteresUnicode(t) else ""
+        return "${m[0]} SMS · ${t.length} caracteres · codificación $cod$causa"
     }
 
     /** Contactos elegidos para el recordatorio (si nunca se eligieron: el grupo Default). */
@@ -860,6 +879,10 @@ fun Activity.confirmarAvisos(r: Recordatorio, motivo: String, omitirPorDefecto: 
 /** Historial de cambios (ChangeLog). Se agrega una entrada con cada versión nueva. */
 object Cambios {
     private val versiones = listOf(
+        "2.3.1" to listOf(
+            "Corrección: «Convertir caracteres» ahora convierte viñetas (•) y otros símbolos comunes.",
+            "El tamaño del SMS indica qué caracteres siguen forzando Unicode."
+        ),
         "2.3" to listOf(
             "SMS: fecha corta «07/11/26 14:00» y «Original Vencido» sin llaves ni comillas.",
             "Al guardar: validación del tamaño de los SMS programados; casillas «OMITIR SMS PROGRAMADOS», «Omitir SMS " +
