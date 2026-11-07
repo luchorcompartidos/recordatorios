@@ -141,6 +141,22 @@
             android:text="Borrar"
             android:visibility="gone" />
 
+        <Button
+            android:id="@+id/btnCumplir"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="Dar por Cumplida"
+            android:visibility="gone" />
+
+        <TextView
+            android:id="@+id/tvEstado"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:textStyle="italic"
+            android:visibility="gone" />
+
         <LinearLayout
             android:id="@+id/listaAvisos"
             android:layout_width="match_parent"

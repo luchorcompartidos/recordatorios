@@ -35,6 +35,26 @@ import android.view.ContextThemeWrapper
 import android.widget.ScrollView
 import java.time.ZonedDateTime
 
+/** "Dar por Cumplida" con confirmación. */
+fun Activity.confirmarCumplir(id: Int, alTerminar: () -> Unit) {
+    val r = Repositorio.obtener(this, id) ?: return
+    val repite = r.activo && r.repeticion != Repeticion.NINGUNA && r.pospuestoHasta == 0L
+    AlertDialog.Builder(this, temaDialogo())
+        .setTitle("Dar por Cumplida")
+        .setMessage("¿Dar por cumplida «${r.titulo}»" +
+            (if (repite) " (ocurrencia del ${Formato.completo(r.proxima)})? El recordatorio sigue desde la próxima ocurrencia."
+             else "?"))
+        .setPositiveButton("Dar por Cumplida") { _, _ ->
+            val c = Estados.cumplir(this, id)
+            if (c != null) Toast.makeText(this,
+                if (c.cumplidoVencido) "Cumplida (fuera de término): pasa a Cumplidos → Vencidos" else "Cumplida: pasa a Cumplidos",
+                Toast.LENGTH_LONG).show()
+            alTerminar()
+        }
+        .setNegativeButton("Cancelar", null)
+        .show()
+}
+
 fun Activity.confirmarBorrado(r: Recordatorio, alTerminar: () -> Unit) {
     AlertDialog.Builder(this)
         .setTitle("Borrar recordatorio")
@@ -225,6 +245,7 @@ class AlarmaActivity : Activity() {
         }
         findViewById<Button>(R.id.alHecho).setOnClickListener {
             Notificador.quitar(this, recId)
+            Estados.marcarRevisar(this, recId)
             finish()
         }
         val rapido = Ajustes.posponerRapido(this)
@@ -281,6 +302,10 @@ class MainActivity : Activity() {
                 .show()
         }
         findViewById<Button>(R.id.btnFiltro).setOnClickListener { elegirFiltro() }
+        findViewById<Button>(R.id.btnSecciones).setOnClickListener { alternarGrupo(SECCIONES) }
+        findViewById<Button>(R.id.btnSubsecciones).setOnClickListener { alternarGrupo(SUBSECCIONES) }
+        findViewById<Button>(R.id.btnAcciones).setOnClickListener { accionesSeleccion() }
+        findViewById<Button>(R.id.btnCancelarSeleccion).setOnClickListener { salirSeleccion() }
         findViewById<Button>(R.id.btnOrden).setOnClickListener { elegirOrden() }
         findViewById<Button>(R.id.btnMostrarNotas).setOnClickListener { guardarColapsadas(emptySet()); mostrarLista() }
         findViewById<Button>(R.id.btnOcultarNotas).setOnClickListener {
@@ -373,13 +398,28 @@ class MainActivity : Activity() {
         val rango = rangoFiltro()
         val visibles = if (rango == null) todos else todos.filter { Calculo.ocurreEntre(it, rango.first, rango.second) }
         if (visibles.isEmpty()) { agregarTitulo("No hay recordatorios para ese período."); return }
-        val proximos = ordenar(visibles.filter { it.activo }) { it.proxima }
-        val pospuestos = ordenar(visibles.filter { it.pospuestoHasta > 0 }) { it.pospuestoHasta }
-        val vencidos = ordenar(visibles.filter { !it.activo && it.pospuestoHasta == 0L }) { it.proxima }
-        if (proximos.isNotEmpty() || pospuestos.isNotEmpty()) agregarTitulo("Próximos")
-        proximos.forEach { agregarItem(it) }
-        if (pospuestos.isNotEmpty()) { agregarTitulo("Pospuestos", sub = true); pospuestos.forEach { agregarItem(it, pospuesto = true) } }
-        if (vencidos.isNotEmpty()) { agregarTitulo("Vencidos"); vencidos.forEach { agregarItem(it) } }
+        val enJuego = visibles.filter { !it.archivado && !it.cumplido }
+        val proximos = ordenar(enJuego.filter { it.activo }) { it.proxima }
+        val pospuestos = ordenar(enJuego.filter { it.pospuestoHasta > 0 }) { it.pospuestoHasta }
+        val vencidos = ordenar(enJuego.filter { !it.activo && it.pospuestoHasta == 0L }) { it.proxima }
+        val cumplidos = visibles.filter { !it.archivado && it.cumplido }
+        val cumplidosATiempo = ordenar(cumplidos.filter { !it.cumplidoVencido }) { it.ocurrencia }
+        val cumplidosVencidos = ordenar(cumplidos.filter { it.cumplidoVencido }) { it.ocurrencia }
+        val archivados = ordenar(visibles.filter { it.archivado }) { it.proxima }
+
+        if (seccion("proximos", "Próximos", proximos.size + pospuestos.size)) {
+            proximos.forEach { agregarItem(it) }
+            if (pospuestos.isNotEmpty() && seccion("pospuestos", "Pospuestos", pospuestos.size, sub = true))
+                pospuestos.forEach { agregarItem(it, pospuesto = true) }
+        }
+        if (seccion("vencidos", "Vencidos", vencidos.size)) vencidos.forEach { agregarItem(it) }
+        if (seccion("cumplidos", "Cumplidos", cumplidos.size)) {
+            cumplidosATiempo.forEach { agregarItem(it) }
+            if (cumplidosVencidos.isNotEmpty() && seccion("cumplidos_vencidos", "Vencidos", cumplidosVencidos.size, sub = true))
+                cumplidosVencidos.forEach { agregarItem(it) }
+        }
+        if (seccion("archivados", "Archivados", archivados.size)) archivados.forEach { agregarItem(it) }
+        actualizarSeleccion()
     }
 
     // ---------- Filtro por fechas y orden (se recuerdan) ----------
@@ -465,6 +505,88 @@ class MainActivity : Activity() {
             .show()
     }
 
+    // ---------- Secciones colapsables ----------
+    private val SECCIONES = listOf("proximos", "vencidos", "cumplidos", "archivados")
+    private val SUBSECCIONES = listOf("pospuestos", "cumplidos_vencidos")
+    private fun seccionesCerradas(): MutableSet<String> =
+        vista().getStringSet("secciones_cerradas", emptySet())!!.toMutableSet()
+    private fun guardarSeccionesCerradas(c: Set<String>) = vista().edit().putStringSet("secciones_cerradas", c).apply()
+
+    /** Dibuja el título de la sección (si tiene elementos) y devuelve true si está expandida. */
+    private fun seccion(clave: String, texto: String, cantidad: Int, sub: Boolean = false): Boolean {
+        if (cantidad == 0) return false
+        val cerrada = clave in seccionesCerradas()
+        agregarTitulo((if (cerrada) "▸ " else "▾ ") + "$texto ($cantidad)", sub)
+        (lista.getChildAt(lista.childCount - 1) as TextView).setOnClickListener {
+            val c = seccionesCerradas()
+            if (cerrada) c -= clave else c += clave
+            guardarSeccionesCerradas(c)
+            mostrarLista()
+        }
+        return !cerrada
+    }
+
+    /** Colapsa o expande en forma conjunta todas las secciones o todas las subsecciones. */
+    private fun alternarGrupo(claves: List<String>) {
+        val c = seccionesCerradas()
+        if (claves.all { it in c }) c.removeAll(claves.toSet()) else c.addAll(claves)
+        guardarSeccionesCerradas(c)
+        mostrarLista()
+    }
+
+    // ---------- Selección múltiple ----------
+    private val seleccionados = mutableSetOf<Int>()
+    private var modoSeleccion = false
+
+    private fun actualizarSeleccion() {
+        findViewById<LinearLayout>(R.id.barraSeleccion).visibility = if (modoSeleccion) View.VISIBLE else View.GONE
+        findViewById<TextView>(R.id.tvSeleccion).text = "${seleccionados.size} seleccionado(s)"
+        val sc = seccionesCerradas()
+        findViewById<Button>(R.id.btnSecciones).text = "Secciones " + if (SECCIONES.all { it in sc }) "▸" else "▾"
+        findViewById<Button>(R.id.btnSubsecciones).text = "Subsecciones " + if (SUBSECCIONES.all { it in sc }) "▸" else "▾"
+    }
+
+    @Deprecated("API de plataforma")
+    override fun onBackPressed() {
+        if (modoSeleccion) salirSeleccion() else @Suppress("DEPRECATION") super.onBackPressed()
+    }
+
+    private fun salirSeleccion() { modoSeleccion = false; seleccionados.clear(); mostrarLista() }
+
+    /** Acciones sobre los seleccionados. Para sumar acciones a futuro, agregarlas a esta lista. */
+    private fun accionesSeleccion() {
+        if (seleccionados.isEmpty()) { aviso("No hay recordatorios seleccionados"); return }
+        val todos = Repositorio.todos(this).filter { it.id in seleccionados }
+        val acciones = mutableListOf<Pair<String, () -> Unit>>()
+        if (todos.any { !it.archivado }) acciones += "Mover a Archivados" to {
+            confirmar("Mover a Archivados", "¿Archivar ${todos.count { !it.archivado }} recordatorio(s)? " +
+                "Dejan de sonar y de enviar avisos.") {
+                Estados.archivar(this, todos.filter { !it.archivado }.map { it.id }); salirSeleccion()
+            }
+        }
+        if (todos.any { it.archivado }) acciones += "Restaurar desde Archivados" to {
+            confirmar("Restaurar desde Archivados", "¿Restaurar ${todos.count { it.archivado }} recordatorio(s)? " +
+                "Los que tengan fecha futura vuelven a sonar.") {
+                Estados.restaurar(this, todos.filter { it.archivado }.map { it.id }); salirSeleccion()
+            }
+        }
+        AlertDialog.Builder(this, temaDialogo())
+            .setTitle("Acciones")
+            .setItems(acciones.map { it.first }.toTypedArray()) { _, i -> acciones[i].second() }
+            .setNegativeButton("Cancelar", null)
+            .show()
+    }
+
+    private fun confirmar(titulo: String, mensaje: String, accion: () -> Unit) {
+        AlertDialog.Builder(this, temaDialogo())
+            .setTitle(titulo).setMessage(mensaje)
+            .setPositiveButton("Confirmar") { _, _ -> accion() }
+            .setNegativeButton("Cancelar", null)
+            .show()
+    }
+
+    private fun aviso(t: String) = Toast.makeText(this, t, Toast.LENGTH_LONG).show()
+
     private fun agregarTitulo(texto: String, sub: Boolean = false) {
         val v = layoutInflater.inflate(R.layout.item_titulo, lista, false) as TextView
         v.text = texto
@@ -495,10 +617,20 @@ class MainActivity : Activity() {
         val v = layoutInflater.inflate(R.layout.item_recordatorio, lista, false)
         v.findViewById<TextView>(R.id.titulo).text =
             r.titulo
-        v.findViewById<TextView>(R.id.detalle).text =
-            if (pospuesto) "Pospuesto hasta el " + Formato.completo(r.pospuestoHasta) else Formato.detalle(r)
+        v.findViewById<TextView>(R.id.detalle).text = when {
+            pospuesto -> "Pospuesto hasta el " + Formato.completo(r.pospuestoHasta)
+            r.cumplido -> "Cumplido el ${Formato.completo(r.cumplidoEn)} · ocurrencia del ${Formato.completo(r.ocurrencia)}"
+            else -> Formato.detalle(r)
+        } + (if (r.archivado) " · Archivado" else "")
         if (pospuesto) v.setPadding(v.paddingLeft * 3, v.paddingTop, v.paddingRight, v.paddingBottom)
-        else if (!r.activo) v.alpha = 0.55f
+        else if (!r.activo && !r.cumplido) v.alpha = 0.55f
+        // "Hecho" en la notificación: marca para revisar y confirmar el cumplimiento.
+        if (r.revisar && !r.cumplido) {
+            v.setBackgroundColor(0x33FFB300)
+            v.findViewById<TextView>(R.id.titulo).text = "⚑ " + r.titulo
+            v.findViewById<TextView>(R.id.detalle).append("\nRevisar: se marcó «Hecho». ¿Lo das por cumplido?")
+        }
+        if (modoSeleccion && r.id in seleccionados) v.setBackgroundColor(0x553D7BFD)
         val nota = textoNota(r, pospuesto)
         if (nota.isNotEmpty()) {
             val clave = r.id.toString()
@@ -542,18 +674,24 @@ class MainActivity : Activity() {
             }
         }
         v.setOnClickListener {
-            startActivity(Intent(this, EditarActivity::class.java).putExtra(Programador.EXTRA_ID, r.id))
+            if (modoSeleccion) {
+                if (r.id in seleccionados) seleccionados -= r.id else seleccionados += r.id
+                mostrarLista()
+            } else startActivity(Intent(this, EditarActivity::class.java).putExtra(Programador.EXTRA_ID, r.id))
         }
         v.setOnLongClickListener {
+            if (modoSeleccion) return@setOnLongClickListener false
+            val opciones = mutableListOf<Pair<String, () -> Unit>>(
+                "Seleccionar (varios)" to { modoSeleccion = true; seleccionados.clear(); seleccionados += r.id; mostrarLista() },
+                "Editar" to { startActivity(Intent(this, EditarActivity::class.java).putExtra(Programador.EXTRA_ID, r.id)) },
+                "Replicar" to { startActivity(Intent(this, EditarActivity::class.java).putExtra(EXTRA_REPLICAR, r.id)) }
+            )
+            if (!r.cumplido && !r.archivado) opciones += "Dar por Cumplida" to { confirmarCumplir(r.id) { mostrarLista() } }
+            if (r.revisar) opciones += "Quitar marca «Revisar»" to { Estados.quitarRevisar(this, r.id); mostrarLista() }
+            opciones += "Borrar" to { confirmarBorrado(r) { mostrarLista() } }
             AlertDialog.Builder(this, temaDialogo())
                 .setTitle(r.titulo)
-                .setItems(arrayOf("Editar", "Replicar", "Borrar")) { _, i ->
-                    when (i) {
-                        0 -> startActivity(Intent(this, EditarActivity::class.java).putExtra(Programador.EXTRA_ID, r.id))
-                        1 -> startActivity(Intent(this, EditarActivity::class.java).putExtra(EXTRA_REPLICAR, r.id))
-                        else -> confirmarBorrado(r) { mostrarLista() }
-                    }
-                }
+                .setItems(opciones.map { it.first }.toTypedArray()) { _, i -> opciones[i].second() }
                 .show()
             true
         }
@@ -807,6 +945,15 @@ class EditarActivity : Activity() {
             }
             btnBorrar.visibility = View.VISIBLE
             btnBorrar.setOnClickListener { confirmarBorrado(r) { finish() } }
+            if (!r.cumplido && !r.archivado) findViewById<Button>(R.id.btnCumplir).apply {
+                visibility = View.VISIBLE
+                setOnClickListener { confirmarCumplir(r.id) { finish() } }
+            }
+            if (r.cumplido || r.archivado) findViewById<TextView>(R.id.tvEstado).apply {
+                visibility = View.VISIBLE
+                text = (if (r.cumplido) "Cumplido el ${Formato.completo(r.cumplidoEn)}. " else "") +
+                    (if (r.archivado) "Archivado. " else "") + "Si cambiás la fecha u hora y guardás, vuelve a Próximos."
+            }
             btnReplicar.visibility = View.VISIBLE
             btnReplicar.setOnClickListener {
                 startActivity(Intent(this, EditarActivity::class.java).putExtra(EXTRA_REPLICAR, r.id))
@@ -908,6 +1055,19 @@ class EditarActivity : Activity() {
             ocurrencias = if (o != null && o.activo) o.ocurrencias else 0,
             excluidos = excluidos.filter { it in seleccion }.toMutableSet()
         )
+        val cambioFecha = o == null || ms != msInicial || rep != o.repeticion || r.dias != o.dias ||
+            r.semanaMes != o.semanaMes || r.diaSemana != o.diaSemana || r.limite != o.limite
+        // Cumplido o archivado sin cambio de fecha/hora: se guardan los cambios y conserva su estado (no suena).
+        if (o != null && (o.cumplido || o.archivado) && !cambioFecha) {
+            r.cumplido = o.cumplido; r.cumplidoEn = o.cumplidoEn; r.ocurrencia = o.ocurrencia
+            r.archivado = o.archivado; r.activo = o.activo; r.proxima = o.proxima; r.ocurrencias = o.ocurrencias
+            Repositorio.guardar(this, r)
+            aviso("Cambios guardados")
+            finish()
+            return
+        }
+        r.ultimaVez = o?.ultimaVez ?: 0
+        r.revisar = (o?.revisar == true) && !cambioFecha   // con fecha nueva, la marca «Revisar» ya no aplica
         Calculo.ajustarInicio(r, ahora)
         // Cancela las alarmas anteriores (incluida una posposición pendiente). La notificación vieja
         // queda en la bandeja hasta que suene la nueva.
@@ -916,8 +1076,6 @@ class EditarActivity : Activity() {
         Programador.programar(this, r)
         aviso("Guardado para el " + Formato.completo(r.proxima))
         // "Omitir SMS para esta edición": marcado si no cambió la fecha, la hora ni la repetición.
-        val cambioFecha = o == null || ms != msInicial || rep != o.repeticion || r.dias != o.dias ||
-            r.semanaMes != o.semanaMes || r.diaSemana != o.diaSemana || r.limite != o.limite
         if (o != null && o.sinSms != r.sinSms) Registro.anotar(this, "#${r.id} SMS " + if (r.sinSms) "inactivo" else "activo")
         confirmarAvisos(r, if (o == null) Envios.NUEVO else Envios.EDITADO, omitirPorDefecto = !cambioFecha) { finish() }
     }

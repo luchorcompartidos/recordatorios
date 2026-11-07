@@ -157,13 +157,18 @@ object Envios {
 
     fun mensaje(ctx: Context, r: Recordatorio, motivo: String, pospuesto: Boolean, whatsapp: Boolean): String {
         val hora = if (pospuesto) System.currentTimeMillis() else r.proxima
-        return Contactos.plantilla(ctx, whatsapp)
-            .replace("{motivo}", motivo)
-            .replace("{titulo}", r.titulo)
-            .replace("{nota}", r.nota)
-            .replace("{hora}", Formato.completo(hora))
-            .replace("{estado}", if (pospuesto) "{\"Original Vencido\"}" else "")
-            .lines().filter { it.isNotBlank() }.joinToString("\n")
+        val campos = mapOf(
+            "{motivo}" to motivo, "{titulo}" to r.titulo, "{nota}" to r.nota,
+            "{hora}" to Formato.completo(hora), "{estado}" to if (pospuesto) "{\"Original Vencido\"}" else ""
+        )
+        // Se respetan las líneas vacías o con espacios escritas en el texto; solo se quita una línea
+        // cuando queda vacía porque un campo vino vacío (por ejemplo {nota} sin nota).
+        return Contactos.plantilla(ctx, whatsapp).split("\n").mapNotNull { linea ->
+            val tieneCampos = campos.keys.any { it in linea }
+            var res = linea
+            campos.forEach { (k, v) -> res = res.replace(k, v) }
+            if (tieneCampos && res.isBlank()) null else res
+        }.joinToString("\n")
     }
 
     /** Contactos elegidos para el recordatorio (si nunca se eligieron: el grupo Default). */
@@ -548,7 +553,8 @@ fun Activity.editarPlantilla(whatsapp: Boolean) {
     val ayuda = TextView(c).apply {
         textSize = 12f
         text = "Campos disponibles:\n{motivo} Nuevo / Modificado / En 15 minutos / Ahora\n{titulo} {nota} {hora}\n" +
-            "{estado} {\"Original Vencido\"} si fue pospuesto\nLas líneas que queden vacías se omiten."
+            "{estado} {\"Original Vencido\"} si fue pospuesto\nLas líneas vacías o con espacios se respetan; solo se " +
+            "omite una línea si queda vacía porque un campo vino vacío."
     }
     val caja = LinearLayout(c).apply {
         orientation = LinearLayout.VERTICAL
@@ -633,7 +639,11 @@ fun Activity.confirmarAvisos(r: Recordatorio, motivo: String, omitirPorDefecto: 
     // Solo para el SMS de este momento: no se guarda y no toca los programados.
     val bloqueados = suspendidos || !Contactos.smsHabilitado(this)
     val omitir = CheckBox(c).apply {
-        text = if (motivo == Envios.NUEVO) "Omitir SMS para este envío" else "Omitir SMS para esta edición"
+        text = when {
+            motivo == Envios.NUEVO -> "Omitir SMS para este envío"
+            omitirPorDefecto -> "OMITIR notificación vía SMS acerca de esta Modificación"
+            else -> "OMITIR notificación vía SMS acerca de esta Modificación de Fecha/Hora"
+        }
         isChecked = omitirPorDefecto
     }
     val notaOmitir = TextView(c).apply { textSize = 12f }
@@ -693,6 +703,14 @@ fun Activity.confirmarAvisos(r: Recordatorio, motivo: String, omitirPorDefecto: 
 /** Historial de cambios (ChangeLog). Se agrega una entrada con cada versión nueva. */
 object Cambios {
     private val versiones = listOf(
+        "2.2" to listOf(
+            "Textos de aviso: se respetan las líneas vacías o con espacios.",
+            "Secciones nuevas: Cumplidos (con subsección Vencidos) y Archivados; secciones y subsecciones colapsables.",
+            "Selección múltiple en la lista: Mover a Archivados y Restaurar desde Archivados.",
+            "«Dar por Cumplida»: cumple la ocurrencia más próxima; si se repite, sigue desde la siguiente.",
+            "«Hecho» en la notificación deja el recordatorio destacado como «Revisar».",
+            "Edición: texto «OMITIR notificación vía SMS acerca de esta Modificación de Fecha/Hora»."
+        ),
         "2.1" to listOf(
             "Crear/editar: control «Envío de SMS: Activo / Inactivo» (equivale a «Anular envío de SMS»); se bloquea si los SMS " +
                 "están deshabilitados en Ajustes (con acceso directo) o suspendidos desde la lista.",

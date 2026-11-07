@@ -115,6 +115,7 @@ object Programador {
 
     /** Después de sonar: calcula la próxima vez o lo marca como vencido. */
     fun avanzar(ctx: Context, r: Recordatorio) {
+        r.ultimaVez = r.proxima
         r.ocurrencias++
         val siguiente = if (r.limite > 0 && r.ocurrencias >= r.limite) null   // llegó a la cantidad de veces
                         else Calculo.siguiente(r, System.currentTimeMillis())
@@ -127,6 +128,7 @@ object Programador {
     fun reprogramarTodos(ctx: Context, avisarPerdidos: Boolean = true) {
         val ahora = System.currentTimeMillis()
         Repositorio.todos(ctx).forEach { r ->
+            if (r.archivado || r.cumplido) return@forEach   // fuera de juego: no suenan
             if (r.pospuestoHasta > 0) {
                 if (r.pospuestoHasta <= ahora) {
                     r.pospuestoHasta = 0
@@ -392,6 +394,7 @@ object Formato {
 class AlarmaReceiver : BroadcastReceiver() {
     override fun onReceive(ctx: Context, intent: Intent) {
         val r = Repositorio.obtener(ctx, intent.getIntExtra(Programador.EXTRA_ID, -1)) ?: return
+        if (r.archivado || r.cumplido) return
         val pospuesto = intent.getBooleanExtra(Programador.EXTRA_POSPUESTO, false)
         if (intent.getBooleanExtra(Programador.EXTRA_PREVIO, false)) {
             val falta = r.proxima - System.currentTimeMillis()
@@ -433,8 +436,105 @@ class AccionReceiver : BroadcastReceiver() {
             Notificador.ACCION_POSPONER ->
                 Programador.posponer(ctx, id,
                     intent.getStringExtra(Programador.EXTRA_CODIGO) ?: Posposicion.POR_DEFECTO)
-            else -> Notificador.quitar(ctx, id)
+            else -> { Notificador.quitar(ctx, id); Estados.marcarRevisar(ctx, id) }
         }
+    }
+}
+
+/** Cumplir, archivar y marcas de revisión. */
+object Estados {
+    /** "Hecho" en la notificación: queda destacado para confirmar el cumplimiento. */
+    fun marcarRevisar(ctx: Context, id: Int) {
+        val r = Repositorio.obtener(ctx, id) ?: return
+        if (r.revisar) return
+        r.revisar = true
+        Repositorio.guardar(ctx, r)
+        Registro.anotar(ctx, "#$id marcado «Hecho»: queda para revisar")
+    }
+
+    fun quitarRevisar(ctx: Context, id: Int) {
+        val r = Repositorio.obtener(ctx, id) ?: return
+        r.revisar = false
+        Repositorio.guardar(ctx, r)
+    }
+
+    /**
+     * Da por cumplida la ocurrencia más próxima.
+     * - Pospuesto: se cumple la ocurrencia que sonó y se pospuso.
+     * - Se repite y quedan ocurrencias: se crea un registro "cumplido" de esa ocurrencia y el recordatorio
+     *   sigue en Próximos desde la siguiente.
+     * - Si no se repite (o era la última): el propio recordatorio pasa a Cumplidos.
+     */
+    fun cumplir(ctx: Context, id: Int): Recordatorio? {
+        val r = Repositorio.obtener(ctx, id) ?: return null
+        val ahora = System.currentTimeMillis()
+        Notificador.quitar(ctx, id)
+        val ocurrencia: Long
+        var siguiente: Long? = null
+        if (r.pospuestoHasta > 0) {
+            Programador.cancelar(ctx, id)
+            ocurrencia = if (r.ultimaVez > 0 && r.repeticion != Repeticion.NINGUNA && r.activo) r.ultimaVez else r.proxima
+            r.pospuestoHasta = 0
+            if (r.activo && r.repeticion != Repeticion.NINGUNA) siguiente = r.proxima   // ya había avanzado al sonar
+        } else {
+            ocurrencia = r.proxima
+            if (r.activo && r.repeticion != Repeticion.NINGUNA) {
+                val restantes = r.limite == 0 || r.ocurrencias + 1 < r.limite
+                if (restantes) siguiente = Calculo.siguiente(r, maxOf(ahora, r.proxima))
+            }
+        }
+        if (siguiente != null) {
+            // Registro aparte de la ocurrencia cumplida; el recordatorio sigue desde la próxima.
+            val copia = r.copy(
+                id = Repositorio.nuevoId(ctx), proxima = ocurrencia, activo = false, cumplido = true,
+                cumplidoEn = ahora, ocurrencia = ocurrencia, revisar = false, pospuestoHasta = 0,
+                repeticion = Repeticion.NINGUNA, dias = mutableSetOf(), historialSms = r.historialSms.toMutableList(),
+                contactos = r.contactos?.toMutableSet(), excluidos = r.excluidos.toMutableSet()
+            )
+            Repositorio.guardar(ctx, copia)
+            if (r.proxima == ocurrencia) { r.ocurrencias++; r.ultimaVez = ocurrencia; r.proxima = siguiente }
+            r.revisar = false
+            Repositorio.guardar(ctx, r)
+            Programador.programar(ctx, r)
+            Registro.anotar(ctx, "#$id ocurrencia del ${Formato.completo(ocurrencia)} cumplida (registro #${copia.id})")
+            return copia
+        }
+        Programador.cancelar(ctx, id)
+        r.cumplido = true; r.cumplidoEn = ahora; r.ocurrencia = ocurrencia
+        r.activo = false; r.revisar = false; r.pospuestoHasta = 0
+        Repositorio.guardar(ctx, r)
+        Registro.anotar(ctx, "#$id dado por cumplido")
+        return r
+    }
+
+    /** Archivar: deja de sonar y de enviar avisos. */
+    fun archivar(ctx: Context, ids: Collection<Int>) {
+        val lista = Repositorio.todos(ctx)
+        lista.filter { it.id in ids && !it.archivado }.forEach {
+            Programador.cancelar(ctx, it.id)
+            Notificador.quitar(ctx, it.id)
+            it.archivado = true
+            it.pospuestoHasta = 0
+        }
+        Repositorio.guardarTodos(ctx, lista)
+        Registro.anotar(ctx, "${ids.size} recordatorio(s) archivado(s)")
+    }
+
+    /** Restaurar desde Archivados: vuelve a su sección y, si corresponde, a sonar. */
+    fun restaurar(ctx: Context, ids: Collection<Int>) {
+        val ahora = System.currentTimeMillis()
+        val lista = Repositorio.todos(ctx)
+        val vuelven = lista.filter { it.id in ids && it.archivado }
+        vuelven.forEach { r ->
+            r.archivado = false
+            if (r.activo && !r.cumplido && r.proxima <= ahora) {
+                val sig = Calculo.siguiente(r, ahora)
+                if (sig == null) r.activo = false else r.proxima = sig
+            }
+        }
+        Repositorio.guardarTodos(ctx, lista)
+        vuelven.filter { it.activo && !it.cumplido }.forEach { Programador.programar(ctx, it) }
+        Registro.anotar(ctx, "${vuelven.size} recordatorio(s) restaurado(s) desde Archivados")
     }
 }
 

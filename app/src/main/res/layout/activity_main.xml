@@ -92,6 +92,61 @@
             android:text="Ocultar notas" />
     </LinearLayout>
 
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:paddingHorizontal="12dp">
+
+        <Button
+            android:id="@+id/btnSecciones"
+            style="?android:attr/borderlessButtonStyle"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="Secciones ▾" />
+
+        <Button
+            android:id="@+id/btnSubsecciones"
+            style="?android:attr/borderlessButtonStyle"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="Subsecciones ▾" />
+    </LinearLayout>
+
+    <LinearLayout
+        android:id="@+id/barraSeleccion"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="#333D7BFD"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingHorizontal="12dp"
+        android:visibility="gone">
+
+        <TextView
+            android:id="@+id/tvSeleccion"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:textStyle="bold" />
+
+        <Button
+            android:id="@+id/btnAcciones"
+            style="?android:attr/borderlessButtonStyle"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Acciones ▾" />
+
+        <Button
+            android:id="@+id/btnCancelarSeleccion"
+            style="?android:attr/borderlessButtonStyle"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Cancelar" />
+    </LinearLayout>
+
     <ScrollView
         android:layout_width="match_parent"
         android:layout_height="0dp"

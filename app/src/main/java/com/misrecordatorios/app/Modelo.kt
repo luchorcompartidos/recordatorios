@@ -41,8 +41,16 @@ data class Recordatorio(
     var diaSemana: Int = 1,         // "El n.º …": 1 = lunes … 7 = domingo
     var limite: Int = 0,            // terminar después de X veces (0 = nunca)
     var ocurrencias: Int = 0,       // veces que ya sonó por su fecha (las posposiciones no cuentan)
-    var excluidos: MutableSet<Int> = mutableSetOf()  // contactos a la vista pero sin recibir avisos
+    var excluidos: MutableSet<Int> = mutableSetOf(), // contactos a la vista pero sin recibir avisos
+    var cumplido: Boolean = false,  // dado por cumplido
+    var cumplidoEn: Long = 0,       // cuándo se dio por cumplido
+    var ocurrencia: Long = 0,       // fecha/hora de la ocurrencia cumplida
+    var archivado: Boolean = false,
+    var revisar: Boolean = false,   // se tocó "Hecho" en la notificación: falta confirmar el cumplimiento
+    var ultimaVez: Long = 0         // última vez que sonó por su fecha
 ) {
+    /** Cumplido después de su fecha/hora → subsección "Vencidos" de Cumplidos. */
+    val cumplidoVencido get() = cumplido && cumplidoEn > ocurrencia
     fun aJson(): JSONObject = JSONObject()
         .put("id", id).put("titulo", titulo).put("nota", nota)
         .put("proxima", proxima).put("rep", repeticion.codigo)
@@ -53,6 +61,8 @@ data class Recordatorio(
         .put("semMes", semanaMes).put("diaSem", diaSemana)
         .put("limite", limite).put("ocurr", ocurrencias)
         .put("excl", JSONArray(excluidos.toList()))
+        .put("cumpl", cumplido).put("cumplEn", cumplidoEn).put("ocurr_c", ocurrencia)
+        .put("arch", archivado).put("revisar", revisar).put("ultVez", ultimaVez)
         .apply { contactos?.let { put("contactos", JSONArray(it.toList())) } }
 
     companion object {
@@ -76,7 +86,13 @@ data class Recordatorio(
                 diaSemana = o.optInt("diaSem", 1),
                 limite = o.optInt("limite", 0),
                 ocurrencias = o.optInt("ocurr", 0),
-                excluidos = o.optJSONArray("excl")?.let { a -> MutableList(a.length()) { a.getInt(it) }.toMutableSet() } ?: mutableSetOf()
+                excluidos = o.optJSONArray("excl")?.let { a -> MutableList(a.length()) { a.getInt(it) }.toMutableSet() } ?: mutableSetOf(),
+                cumplido = o.optBoolean("cumpl", false),
+                cumplidoEn = o.optLong("cumplEn", 0),
+                ocurrencia = o.optLong("ocurr_c", 0),
+                archivado = o.optBoolean("arch", false),
+                revisar = o.optBoolean("revisar", false),
+                ultimaVez = o.optLong("ultVez", 0)
             )
         }
     }
