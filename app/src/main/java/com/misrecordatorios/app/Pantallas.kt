@@ -585,6 +585,56 @@ class EditarActivity : Activity() {
     private lateinit var cbAlarma: CheckBox
     private lateinit var btnContactos: Button
     private lateinit var listaAvisos: LinearLayout
+    private lateinit var swSms: Switch
+    private lateinit var tvSmsBloqueo: TextView
+    private var smsTocado = false
+    private var msInicial = 0L
+
+    /** Bloqueo del control de SMS: por Ajustes Generales o por suspensión masiva. */
+    private fun actualizarSms() {
+        val porAjustes = !Contactos.smsHabilitado(this)
+        val porSuspension = SuspensionSms.activa(this)
+        // Cambios hechos por la app (no por el usuario): sin disparar el listener.
+        swSms.setOnCheckedChangeListener(null)
+        if (!porAjustes && !porSuspension && original == null && !smsTocado) swSms.isChecked = true   // nuevo: activo por defecto
+        if (porAjustes && original == null && !smsTocado) swSms.isChecked = false
+        swSms.setOnCheckedChangeListener { _, _ -> smsTocado = true; actualizarSms() }
+        swSms.isEnabled = !porAjustes && !porSuspension
+        swSms.text = "Envío de SMS: " + if (swSms.isChecked && swSms.isEnabled) "Activo" else "Inactivo"
+        when {
+            porSuspension -> {
+                tvSmsBloqueo.visibility = View.VISIBLE
+                tvSmsBloqueo.text = "Suspendidos/Anulados desde la lista principal"
+                tvSmsBloqueo.setOnClickListener(null)
+            }
+            porAjustes -> {
+                tvSmsBloqueo.visibility = View.VISIBLE
+                val t = android.text.SpannableString("Deshabilitado desde Ajustes Generales")
+                val ini = t.indexOf("Ajustes Generales")
+                t.setSpan(android.text.style.UnderlineSpan(), ini, t.length, 0)
+                t.setSpan(android.text.style.ForegroundColorSpan(0xFF4A90E2.toInt()), ini, t.length, 0)
+                tvSmsBloqueo.text = t
+                tvSmsBloqueo.setOnClickListener {
+                    startActivity(Intent(this, AjustesActivity::class.java).putExtra(EXTRA_FOCO_SMS, true))
+                }
+            }
+            else -> tvSmsBloqueo.visibility = View.GONE
+        }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        if (::swSms.isInitialized) actualizarSms()   // al volver de Ajustes
+    }
+
+    override fun onSaveInstanceState(estado: Bundle) {
+        super.onSaveInstanceState(estado)
+        estado.putLong("fecha", fechaHora.toInstant().toEpochMilli())
+        estado.putIntArray("sel", seleccion.toIntArray())
+        estado.putIntArray("excl", excluidos.toIntArray())
+        estado.putBoolean("sms", swSms.isChecked)
+        estado.putBoolean("smsTocado", smsTocado)
+    }
     private val seleccion = mutableSetOf<Int>()
     private val excluidos = mutableSetOf<Int>()
     private val checks = mutableListOf<CheckBox>()
@@ -659,6 +709,8 @@ class EditarActivity : Activity() {
         cbAlarma = findViewById(R.id.cbAlarma)
         btnContactos = findViewById(R.id.btnContactos)
         listaAvisos = findViewById(R.id.listaAvisos)
+        swSms = findViewById(R.id.swSms)
+        tvSmsBloqueo = findViewById(R.id.tvSmsBloqueo)
         val extra = findViewById<LinearLayout>(R.id.filaExtra)
         val btnBorrar = findViewById<Button>(R.id.btnBorrar)
         val btnReplicar = findViewById<Button>(R.id.btnReplicar)
@@ -732,10 +784,12 @@ class EditarActivity : Activity() {
             spDiaSemana.setSelection((base.diaSemana - 1).coerceIn(0, 6))
             if (base.limite > 0) { spTerminar.setSelection(1); etVeces.setText(base.limite.toString()) }
             cbAlarma.isChecked = base.alarma
+            swSms.isChecked = !base.sinSms
             seleccion += base.contactos ?: Contactos.defaults(this).map { it.id }
             excluidos += base.excluidos
         } else {
             cbAlarma.isChecked = Ajustes.alarmaPorDefecto(this)
+            swSms.isChecked = Contactos.smsHabilitado(this) && !SuspensionSms.activa(this)
             seleccion += Contactos.defaults(this).map { it.id }
             fechaHora = ZonedDateTime.now().withSecond(0).withNano(0)
             spOrdinal.setSelection(((fechaHora.dayOfMonth - 1) / 7).coerceAtMost(3))
@@ -761,6 +815,17 @@ class EditarActivity : Activity() {
         } else {
             title = if (replica) "Nuevo recordatorio (réplica)" else "Nuevo recordatorio"
         }
+        msInicial = fechaHora.toInstant().toEpochMilli()
+        // Si Android cerró la pantalla mientras estaba en segundo plano, se recupera lo que se estaba editando.
+        if (estado != null) {
+            fechaHora = Calculo.zdt(estado.getLong("fecha", msInicial))
+            estado.getIntArray("sel")?.let { seleccion.clear(); seleccion += it.toList() }
+            estado.getIntArray("excl")?.let { excluidos.clear(); excluidos += it.toList() }
+            swSms.isChecked = estado.getBoolean("sms", swSms.isChecked)
+            smsTocado = estado.getBoolean("smsTocado", false)
+        }
+        swSms.setOnCheckedChangeListener { _, _ -> smsTocado = true; actualizarSms() }
+        actualizarSms()
         actualizarBotones()
         actualizarContactos()
         btnContactos.setOnClickListener { elegirContactos(seleccion) { excluidos.retainAll(seleccion); actualizarContactos() } }
@@ -828,7 +893,11 @@ class EditarActivity : Activity() {
             activo = true,
             alarma = cbAlarma.isChecked,
             contactos = seleccion.toMutableSet(),
-            sinSms = (o?.sinSms ?: false) || suspendidos,
+            sinSms = when {
+                suspendidos -> true
+                !Contactos.smsHabilitado(this) -> o?.sinSms ?: true   // bloqueado: se mantiene (nuevo = inactivo)
+                else -> !swSms.isChecked
+            },
             historialSms = (o?.historialSms ?: mutableListOf()).toMutableList().apply {
                 if (o == null && suspendidos) add("Creado con SMS suspendidos/anulados el ${Formato.completo(ahora)}")
             },
@@ -846,6 +915,10 @@ class EditarActivity : Activity() {
         Repositorio.guardar(this, r)
         Programador.programar(this, r)
         aviso("Guardado para el " + Formato.completo(r.proxima))
-        confirmarAvisos(r, if (o == null) Envios.NUEVO else Envios.EDITADO) { finish() }
+        // "Omitir SMS para esta edición": marcado si no cambió la fecha, la hora ni la repetición.
+        val cambioFecha = o == null || ms != msInicial || rep != o.repeticion || r.dias != o.dias ||
+            r.semanaMes != o.semanaMes || r.diaSemana != o.diaSemana || r.limite != o.limite
+        if (o != null && o.sinSms != r.sinSms) Registro.anotar(this, "#${r.id} SMS " + if (r.sinSms) "inactivo" else "activo")
+        confirmarAvisos(r, if (o == null) Envios.NUEVO else Envios.EDITADO, omitirPorDefecto = !cambioFecha) { finish() }
     }
 }

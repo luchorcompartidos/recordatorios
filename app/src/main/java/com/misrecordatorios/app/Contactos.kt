@@ -599,7 +599,7 @@ fun Activity.elegirContactos(seleccion: MutableSet<Int>, alCambiar: () -> Unit) 
  * Al crear o editar: confirma a quién avisar. Nada se envía sin tocar un botón de Enviar.
  * "Anular envío de SMS" queda guardado en el recordatorio y también afecta a los avisos programados.
  */
-fun Activity.confirmarAvisos(r: Recordatorio, motivo: String, alTerminar: () -> Unit) {
+fun Activity.confirmarAvisos(r: Recordatorio, motivo: String, omitirPorDefecto: Boolean = false, alTerminar: () -> Unit) {
     val activos = Contactos.activos(this)
     if (activos.isEmpty()) { alTerminar(); return }
     val sel = Envios.destinatarios(this, r).map { it.id }.toSet()
@@ -630,10 +630,30 @@ fun Activity.confirmarAvisos(r: Recordatorio, motivo: String, alTerminar: () -> 
         setTypeface(typeface, Typeface.BOLD)
         visibility = if (r.sinSms) View.VISIBLE else View.GONE
     }
-    anular.setOnCheckedChangeListener { _, v -> leyenda.visibility = if (v) View.VISIBLE else View.GONE }
+    // Solo para el SMS de este momento: no se guarda y no toca los programados.
+    val bloqueados = suspendidos || !Contactos.smsHabilitado(this)
+    val omitir = CheckBox(c).apply {
+        text = if (motivo == Envios.NUEVO) "Omitir SMS para este envío" else "Omitir SMS para esta edición"
+        isChecked = omitirPorDefecto
+    }
+    val notaOmitir = TextView(c).apply { textSize = 12f }
+    fun refrescarOmitir() {
+        val sinEfecto = anular.isChecked || bloqueados
+        omitir.isEnabled = !sinEfecto
+        notaOmitir.text = when {
+            sinEfecto -> "(No se envía SMS en este momento.)"
+            omitir.isChecked -> "No se envía SMS ahora. Los SMS programados (15 min antes y en el momento) quedan activos."
+            else -> "Se envía SMS ahora. Los SMS programados (15 min antes y en el momento) quedan activos."
+        }
+    }
+    anular.setOnCheckedChangeListener { _, v -> leyenda.visibility = if (v) View.VISIBLE else View.GONE; refrescarOmitir() }
+    omitir.setOnCheckedChangeListener { _, _ -> refrescarOmitir() }
+    refrescarOmitir()
     caja.addView(subtitulo(c, "Opciones"))
     caja.addView(anular)
     caja.addView(leyenda)
+    caja.addView(omitir)
+    caja.addView(notaOmitir)
     if (suspendidos) caja.addView(TextView(c).apply {
         text = "Envíos SMS se encuentran SUSPENDIDOS/ANULADOS"
         setTypeface(typeface, Typeface.BOLD)
@@ -652,7 +672,8 @@ fun Activity.confirmarAvisos(r: Recordatorio, motivo: String, alTerminar: () -> 
         decidido = true
         guardarAnulacion()
         if (lista.isEmpty()) { aviso("No se eligió ningún contacto"); alTerminar(); return }
-        val conSms = lista.filter { Envios.usaSms(this, r, it) }
+        val conSms = if (omitir.isChecked) emptyList() else lista.filter { Envios.usaSms(this, r, it) }
+        if (omitir.isChecked && !anular.isChecked) Registro.anotar(this, "#${r.id} SMS omitido para este envío")
         conSms.forEach { Envios.enviarSms(this, it, Envios.mensaje(this, r, motivo, false, false)) }
         if (conSms.isNotEmpty()) aviso("SMS enviado a ${conSms.size} contacto(s)")
         val wa = lista.filter { it.modo.whatsapp }
@@ -672,6 +693,13 @@ fun Activity.confirmarAvisos(r: Recordatorio, motivo: String, alTerminar: () -> 
 /** Historial de cambios (ChangeLog). Se agrega una entrada con cada versión nueva. */
 object Cambios {
     private val versiones = listOf(
+        "2.1" to listOf(
+            "Crear/editar: control «Envío de SMS: Activo / Inactivo» (equivale a «Anular envío de SMS»); se bloquea si los SMS " +
+                "están deshabilitados en Ajustes (con acceso directo) o suspendidos desde la lista.",
+            "Confirmación al guardar: nueva casilla «Omitir SMS para esta edición» (solo el envío del momento). Marcada por " +
+                "defecto si no cambió la fecha, la hora ni la repetición.",
+            "Ajustes: acceso directo que resalta «Envío de SMS habilitado»; al volver se retoma el recordatorio en curso."
+        ),
         "2.0" to listOf(
             "Replicar recordatorios (botón en la edición y en el menú al mantener presionado en la lista).",
             "Repeticiones nuevas: Anual y «El 1.º/2.º/3.º/4.º/último [día] del mes»; «Mensual» pasa a llamarse «El día NN de cada mes».",

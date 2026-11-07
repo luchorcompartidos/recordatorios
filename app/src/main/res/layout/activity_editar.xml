@@ -92,6 +92,24 @@
             android:layout_marginTop="12dp"
             android:text="Contactos a avisar" />
 
+        <Switch
+            android:id="@+id/swSms"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:minHeight="48dp"
+            android:text="Envío de SMS: Activo"
+            android:textSize="16sp" />
+
+        <TextView
+            android:id="@+id/tvSmsBloqueo"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:minHeight="40dp"
+            android:gravity="center_vertical"
+            android:textColor="?android:attr/textColorSecondary"
+            android:visibility="gone" />
+
         <TextView
             android:id="@+id/tvSmsAnulado"
             android:layout_width="wrap_content"

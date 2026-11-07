@@ -305,6 +305,8 @@ fun Activity.elegirHora(inicial: LocalTime, alCancelar: () -> Unit = {}, alElegi
     dialogo.show()
 }
 
+const val EXTRA_FOCO_SMS = "foco_sms"
+
 /** Ajustes generales. */
 class AjustesActivity : Activity() {
     private lateinit var estadoCopia: TextView
@@ -441,7 +443,18 @@ class AjustesActivity : Activity() {
                 .show()
         }
 
-        setContentView(ScrollView(this).apply { addView(raiz) })
+        val desplazable = ScrollView(this).apply { addView(raiz) }
+        setContentView(desplazable)
+        if (intent.getBooleanExtra(EXTRA_FOCO_SMS, false)) desplazable.post {
+            desplazable.smoothScrollTo(0, (interruptorSms.top - m * 3).coerceAtLeast(0))
+            interruptorSms.requestFocus()
+            android.animation.ObjectAnimator.ofFloat(interruptorSms, "alpha", 1f, 0.15f).apply {
+                duration = 350
+                repeatCount = 7
+                repeatMode = android.animation.ValueAnimator.REVERSE
+                start()
+            }
+        }
     }
 
     private fun refrescarCopia() {
