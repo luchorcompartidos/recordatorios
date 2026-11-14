@@ -16,7 +16,8 @@ android {
         minSdk = 34          // Android 14
         targetSdk = 35
         versionCode = numeroCompilacion
-        versionName = "2.4.$numeroCompilacion"
+        // Lo define el workflow según el tag (ej. 1.1.0); en compilaciones de prueba queda "prueba-N".
+        versionName = System.getenv("VERSION_NAME") ?: "prueba-$numeroCompilacion"
     }
 
     signingConfigs {

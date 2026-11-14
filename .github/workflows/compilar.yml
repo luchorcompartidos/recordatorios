@@ -1,18 +1,60 @@
 name: Compilar APK
 
+# Esquema de versiones (solo para este repo):
+#   - Sin marca en el commit:   compila de prueba, NO publica Release (el APK queda en Actions > Artifacts).
+#   - "[minor]" en el mensaje:  sube el 3er número  -> v1.1.0, v1.1.1, v1.1.2 ...
+#   - "[major]" en el mensaje:  sube el 2do número  -> v1.2.0 (y el 3ro vuelve a 0)
+# La primera versión publicada con este esquema es v1.1.0 (las anteriores eran v1.0.N).
+
 on:
   push:
     branches: [ main ]
   workflow_dispatch:
+    inputs:
+      marca:
+        description: 'Tipo de versión'
+        type: choice
+        options: [ prueba, minor, major ]
+        default: prueba
 
 permissions:
   contents: write
+
+concurrency:
+  group: compilar
+  cancel-in-progress: false
 
 jobs:
   compilar:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Calcular versión
+        env:
+          MSG: ${{ github.event.head_commit.message }}
+          MARCA: ${{ inputs.marca }}
+        run: |
+          if   [ "$MARCA" = "major" ] || grep -q '\[major\]' <<< "$MSG"; then tipo=major
+          elif [ "$MARCA" = "minor" ] || grep -q '\[minor\]' <<< "$MSG"; then tipo=minor
+          else tipo=prueba
+          fi
+          last=$(git tag -l 'v*' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -1)
+          IFS=. read -r X Y Z <<< "${last#v}"
+          if [ "$tipo" = "prueba" ]; then
+            echo "Compilación de prueba: no se publica Release."
+          elif [ -z "$last" ] || [ "$X.$Y" = "1.0" ]; then
+            next="1.1.0"
+          elif [ "$tipo" = "major" ]; then
+            next="$X.$((Y+1)).0"
+          else
+            next="$X.$Y.$((Z+1))"
+          fi
+          echo "TIPO=$tipo" >> "$GITHUB_ENV"
+          [ -n "$next" ] && echo "VERSION_NAME=$next" >> "$GITHUB_ENV"
+          echo "Última: ${last:-ninguna} -> Nueva: ${next:-(prueba)}"
 
       - uses: actions/setup-java@v4
         with:
@@ -39,12 +81,24 @@ jobs:
           KEYSTORE_PASS: ${{ secrets.KEYSTORE_PASS }}
         run: gradle assembleRelease --no-daemon
 
+      - name: Guardar APK de prueba
+        if: env.TIPO == 'prueba'
+        uses: actions/upload-artifact@v4
+        with:
+          name: recordatorios-prueba-${{ github.run_number }}
+          path: app/build/outputs/apk/release/app-release.apk
+          retention-days: 7
+
       - name: Publicar versión
+        if: env.TIPO != 'prueba'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          N=${{ github.run_number }}
-          cp app/build/outputs/apk/release/app-release.apk "recordatorios-1.0.$N.apk"
-          gh release create "v1.0.$N" "recordatorios-1.0.$N.apk" \
-            --title "Recordatorios 1.0.$N" \
-            --notes "Compilación automática. Descargá el APK desde el celular e instalalo."
+          V="$VERSION_NAME"
+          cp app/build/outputs/apk/release/app-release.apk "recordatorios-$V.apk"
+          git tag "v$V"
+          git push origin "v$V"
+          gh release create "v$V" "recordatorios-$V.apk" \
+            --title "Recordatorios $V" \
+            --notes "$(git log -1 --pretty=%s | sed -E 's/ *\[(minor|major)\]//g')" \
+            --latest
