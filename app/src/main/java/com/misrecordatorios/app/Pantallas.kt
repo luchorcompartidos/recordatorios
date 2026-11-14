@@ -2,6 +2,7 @@ package com.misrecordatorios.app
 
 import android.Manifest
 import android.app.Activity
+import android.app.ActivityManager
 import android.app.AlarmManager
 import android.app.AlertDialog
 import android.app.DatePickerDialog
@@ -355,6 +356,8 @@ class MainActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
+        // Si la app se detuvo a la fuerza, Android borra sus alarmas: al abrirla se vuelven a programar todas.
+        Programador.reprogramarTodos(this, margenMs = 2 * 60_000L, registrar = false)
         mostrarPendientes()
         actualizarPestanias()
         actualizarSms()
@@ -381,6 +384,11 @@ class MainActivity : Activity() {
             usaAlarmas() && !nm.canUseFullScreenIntent() ->
                 mostrarAviso("Para que las alarmas aparezcan a pantalla completa falta un permiso. Tocá acá para habilitarlo.") {
                     startActivity(Intent(Settings.ACTION_MANAGE_APP_USE_FULL_SCREEN_INTENT, Uri.parse("package:$packageName")))
+                }
+            getSystemService(ActivityManager::class.java).isBackgroundRestricted ->
+                mostrarAviso("La batería de la app está en modo «Restringido» y los recordatorios pueden no sonar. " +
+                    "Tocá acá y en «Batería» elegí «Optimizado» o «Sin restricciones».") {
+                    startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName")))
                 }
             else -> aviso.visibility = View.GONE
         }

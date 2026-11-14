@@ -60,7 +60,7 @@ object Programador {
         }
     }
 
-    fun programar(ctx: Context, r: Recordatorio) {
+    fun programar(ctx: Context, r: Recordatorio, registrar: Boolean = true) {
         cancelar(ctx, r.id, incluirPospuesto = false)
         if (!r.activo) return
         val modo = alarmaEn(ctx, r.proxima, pendiente(ctx, r.id, false), r.alarma)
@@ -69,7 +69,7 @@ object Programador {
         if (previo > System.currentTimeMillis() && Envios.destinatarios(ctx, r).isNotEmpty()) {
             alarmaEn(ctx, previo, pendiente(ctx, r.id, false, previo = true), false)
         }
-        Registro.anotar(ctx, "#${r.id} «${r.titulo}» programado para ${Formato.completo(r.proxima)} ($modo)")
+        if (registrar) Registro.anotar(ctx, "#${r.id} «${r.titulo}» programado para ${Formato.completo(r.proxima)} ($modo)")
     }
 
     /** Pospone según el código de [Posposicion]. Devuelve el momento elegido, o null si no se pudo. */
@@ -124,9 +124,13 @@ object Programador {
         programar(ctx, r)
     }
 
-    /** Tras reiniciar el celular, cambiar la hora, actualizar la app o restaurar una copia. */
-    fun reprogramarTodos(ctx: Context, avisarPerdidos: Boolean = true) {
-        val ahora = System.currentTimeMillis()
+    /**
+     * Tras reiniciar el celular, cambiar la hora, actualizar la app, restaurar una copia o abrir la app.
+     * [margenMs]: lo vencido hace menos que eso se reprograma (suena enseguida, una sola vez) en vez de
+     * tratarse como perdido; evita avisos duplicados si una alarma está por dispararse al abrir la app.
+     */
+    fun reprogramarTodos(ctx: Context, avisarPerdidos: Boolean = true, margenMs: Long = 0, registrar: Boolean = true) {
+        val ahora = System.currentTimeMillis() - margenMs
         Repositorio.todos(ctx).forEach { r ->
             if (r.archivado || r.cumplido) return@forEach   // fuera de juego: no suenan
             if (r.pospuestoHasta > 0) {
@@ -149,7 +153,7 @@ object Programador {
                 }
                 avanzar(ctx, r)
             } else {
-                programar(ctx, r)
+                programar(ctx, r, registrar)
             }
         }
     }
