@@ -384,6 +384,21 @@ object Formato {
     fun completo(ms: Long): String = Calculo.zdt(ms).format(fCompleto)
 
     fun detalle(r: Recordatorio): String {
+        return (if (r.activo) "" else "Vencido: ") + completo(r.proxima) + extra(r) +
+            (if (r.alarma) " · Alarma" else "") + (if (r.sinSms) " · SMS anulado" else "")
+    }
+
+    /** Etiqueta corta de la repetición para la lista ("Mensual", "Semanal"…), o "" si no se repite. */
+    fun repeticionCorta(r: Recordatorio): String = when (r.repeticion) {
+        Repeticion.NINGUNA -> ""
+        Repeticion.DIARIA -> "Diaria"
+        Repeticion.SEMANAL -> "Semanal"
+        Repeticion.MENSUAL, Repeticion.NSEMANA -> "Mensual"
+        Repeticion.ANUAL -> "Anual"
+    }
+
+    /** Repetición y cantidad de veces (" · El día 10 de cada mes · 2/12 veces"), sin fecha ni hora. */
+    fun extra(r: Recordatorio): String {
         val rep = when (r.repeticion) {
             Repeticion.NINGUNA -> ""
             Repeticion.DIARIA -> " · Todos los días"
@@ -393,9 +408,10 @@ object Formato {
             Repeticion.ANUAL -> " · Anual (" + Calculo.zdt(r.proxima).format(DateTimeFormatter.ofPattern("d 'de' MMMM", loc)) + ")"
         }
         val veces = if (r.limite > 0 && r.repeticion != Repeticion.NINGUNA) " · ${r.ocurrencias}/${r.limite} veces" else ""
-        return (if (r.activo) "" else "Vencido: ") + completo(r.proxima) + rep + veces +
-            (if (r.alarma) " · Alarma" else "") + (if (r.sinSms) " · SMS anulado" else "")
+        return rep + veces
     }
+
+    fun hora(ms: Long): String = Calculo.zdt(ms).format(fHora)
 }
 
 /** Suena la alarma: muestra la notificación y programa la próxima. */

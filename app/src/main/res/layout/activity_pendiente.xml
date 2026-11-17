@@ -28,6 +28,7 @@
 
         <Button
             android:id="@+id/btnPendGuardar"
+            style="@style/Boton.Principal"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="28dp"
@@ -42,6 +43,7 @@
 
         <Button
             android:id="@+id/btnPendBorrar"
+            style="@style/Boton.Peligro"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="8dp"

@@ -417,6 +417,7 @@ class MainActivity : Activity() {
 
     private fun mostrarLista() {
         lista.removeAllViews()
+        armarSemana()
         val todos = Repositorio.todos(this)
         if (todos.isEmpty()) {
             agregarTitulo("No hay recordatorios. Tocá «Nuevo recordatorio» para crear uno.")
@@ -436,19 +437,121 @@ class MainActivity : Activity() {
         val archivados = ordenar(visibles.filter { it.archivado }) { it.proxima }
 
         if (seccion("proximos", "Próximos", proximos.size + pospuestos.size)) {
-            proximos.forEach { agregarItem(it) }
+            agregarProximos(proximos)
             if (pospuestos.isNotEmpty() && seccion("pospuestos", "Pospuestos", pospuestos.size, sub = true))
-                pospuestos.forEach { agregarItem(it, pospuesto = true) }
+                pospuestos.forEach { agregarItem(it, pospuesto = true, tono = R.color.chip_alarma) }
         }
-        if (seccion("vencidos", "Vencidos", vencidos.size)) vencidos.forEach { agregarItem(it) }
+        if (seccion("vencidos", "Vencidos", vencidos.size)) vencidos.forEach { agregarItem(it, tono = R.color.rojo) }
         if (seccion("cumplidos", "Cumplidos", cumplidos.size)) {
-            cumplidosATiempo.forEach { agregarItem(it) }
+            cumplidosATiempo.forEach { agregarItem(it, tono = R.color.texto3) }
             if (cumplidosVencidos.isNotEmpty() && seccion("cumplidos_vencidos", "Vencidos", cumplidosVencidos.size, sub = true))
-                cumplidosVencidos.forEach { agregarItem(it) }
+                cumplidosVencidos.forEach { agregarItem(it, tono = R.color.texto3) }
         }
-        if (seccion("archivados", "Archivados", archivados.size)) archivados.forEach { agregarItem(it) }
+        if (seccion("archivados", "Archivados", archivados.size)) archivados.forEach { agregarItem(it, tono = R.color.texto3) }
         actualizarSeleccion()
         findViewById<Button>(R.id.btnNotas).text = if (todasNotasOcultas()) "Mostrar notas" else "Ocultar notas"
+    }
+
+    // ---------- Diseño "Agenda": próximos agrupados por día y tira de la semana ----------
+    private val locAr = java.util.Locale.forLanguageTag("es-AR")
+
+    /** Próximos: si el orden es por fecha, se agrupan por día con la línea de tiempo; si no, lista simple. */
+    private fun agregarProximos(proximos: List<Recordatorio>) {
+        val porFecha = vista().getString("orden", "fecha_asc")!!.startsWith("fecha")
+        if (!porFecha) { proximos.forEach { agregarItem(it) }; return }
+        val zona = java.time.ZoneId.systemDefault()
+        val grupos = proximos.groupBy { java.time.Instant.ofEpochMilli(it.proxima).atZone(zona).toLocalDate() }
+        grupos.forEach { (dia, items) ->
+            agregarDia(dia)
+            items.forEachIndexed { i, r -> agregarItem(r, conHora = true, conLinea = i < items.size - 1) }
+        }
+    }
+
+    private fun textoDia(dia: LocalDate): String {
+        val hoy = LocalDate.now()
+        val nombre = dia.format(java.time.format.DateTimeFormatter.ofPattern(
+            if (dia.year == hoy.year) "EEEE d 'de' MMMM" else "EEEE d 'de' MMMM yyyy", locAr))
+        return when (dia) {
+            hoy -> "Hoy · $nombre"
+            hoy.plusDays(1) -> "Mañana · $nombre"
+            else -> nombre.replaceFirstChar { it.titlecase(locAr) }
+        }
+    }
+
+    private fun agregarDia(dia: LocalDate) {
+        val v = layoutInflater.inflate(R.layout.item_titulo, lista, false) as TextView
+        v.text = textoDia(dia)
+        v.textSize = 14f
+        v.setPadding(v.paddingLeft, (10 * resources.displayMetrics.density).toInt(), v.paddingRight, v.paddingBottom)
+        if (dia == LocalDate.now()) v.setTextColor(getColor(R.color.acento))
+        lista.addView(v)
+    }
+
+    /** Tira de 7 días desde hoy: tocar un día filtra por ese día; tocarlo de nuevo vuelve a "Todos". */
+    private fun armarSemana() {
+        val cont = findViewById<LinearLayout>(R.id.semana)
+        cont.removeAllViews()
+        val hoy = LocalDate.now()
+        findViewById<TextView>(R.id.tvSemana).text = hoy.format(
+            java.time.format.DateTimeFormatter.ofPattern("MMMM yyyy", locAr)).replaceFirstChar { it.titlecase(locAr) }
+        val f = vista().getString("filtro", "todos")
+        val diaFiltro = if (f == "dia") LocalDate.ofEpochDay(vista().getLong("filtro_dia", hoy.toEpochDay())) else null
+        val zona = java.time.ZoneId.systemDefault()
+        val conAlgo = Repositorio.todos(this).filter { it.activo && !it.archivado && !it.cumplido }
+            .map { java.time.Instant.ofEpochMilli(it.proxima).atZone(zona).toLocalDate() }.toSet()
+        val letras = listOf("L", "M", "M", "J", "V", "S", "D")
+        val d = resources.displayMetrics.density
+        for (i in 0..6) {
+            val dia = hoy.plusDays(i.toLong())
+            val elegido = dia == diaFiltro || (f == "hoy" && i == 0) || (f == "manana" && i == 1)
+            val celda = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                gravity = android.view.Gravity.CENTER
+                setBackgroundResource(if (elegido) R.drawable.dia_on else R.drawable.dia)
+                minimumHeight = (60 * d).toInt()
+                contentDescription = textoDia(dia)
+                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
+                    marginStart = (3 * d).toInt(); marginEnd = (3 * d).toInt()
+                }
+                isClickable = true
+                setOnClickListener {
+                    if (elegido) vista().edit().putString("filtro", "todos").apply()
+                    else vista().edit().putString("filtro", "dia").putLong("filtro_dia", dia.toEpochDay()).apply()
+                    mostrarLista()
+                }
+            }
+            val colorTexto = getColor(if (elegido) R.color.sobre_acento else R.color.texto)
+            celda.addView(TextView(this).apply {
+                text = letras[dia.dayOfWeek.value - 1]; textSize = 11f
+                setTextColor(if (elegido) colorTexto else getColor(R.color.texto2)); gravity = android.view.Gravity.CENTER
+            })
+            celda.addView(TextView(this).apply {
+                text = dia.dayOfMonth.toString(); textSize = 16f; setTypeface(typeface, android.graphics.Typeface.BOLD)
+                setTextColor(colorTexto); gravity = android.view.Gravity.CENTER
+            })
+            celda.addView(View(this).apply {   // puntito: ese día hay recordatorios
+                setBackgroundResource(R.drawable.punto)
+                backgroundTintList = android.content.res.ColorStateList.valueOf(
+                    if (dia in conAlgo) colorTexto else android.graphics.Color.TRANSPARENT)
+                layoutParams = LinearLayout.LayoutParams((5 * d).toInt(), (5 * d).toInt()).apply { topMargin = (3 * d).toInt() }
+            })
+            cont.addView(celda)
+        }
+    }
+
+    /** Etiqueta de color (Alarma, repetición, contactos…). */
+    private fun etiqueta(cont: LinearLayout, texto: String, fondo: Int, color: Int) {
+        val d = resources.displayMetrics.density
+        cont.addView(TextView(this).apply {
+            text = texto; textSize = 11f; setTypeface(typeface, android.graphics.Typeface.BOLD)
+            setTextColor(getColor(color))
+            setBackgroundResource(R.drawable.etiqueta)
+            backgroundTintList = android.content.res.ColorStateList.valueOf(getColor(fondo))
+            setPadding((10 * d).toInt(), (3 * d).toInt(), (10 * d).toInt(), (3 * d).toInt())
+            layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT).apply { marginEnd = (6 * d).toInt() }
+        })
+        cont.visibility = View.VISIBLE
     }
 
     // ---------- Filtro por fechas y orden (se recuerdan) ----------
@@ -544,17 +647,20 @@ class MainActivity : Activity() {
         val enPendientes = vista().getString("pestania", "recordatorios") == "pendientes"
         findViewById<View>(R.id.panelPendientes).visibility = if (enPendientes) View.VISIBLE else View.GONE
         findViewById<View>(R.id.panelRecordatorios).visibility = if (enPendientes) View.GONE else View.VISIBLE
-        findViewById<View>(R.id.indPendientes).visibility = if (enPendientes) View.VISIBLE else View.INVISIBLE
-        findViewById<View>(R.id.indRecordatorios).visibility = if (enPendientes) View.INVISIBLE else View.VISIBLE
+        // Píldora marcada = pestaña elegida.
+        findViewById<View>(R.id.tabPendientes).setBackgroundResource(if (enPendientes) R.drawable.chip_on else R.drawable.chip)
+        findViewById<View>(R.id.tabRecordatorios).setBackgroundResource(if (enPendientes) R.drawable.chip else R.drawable.chip_on)
         findViewById<TextView>(R.id.tvTabPendientes).apply {
             text = "Pendientes (${Pendientes.todos(this@MainActivity).size})"
-            alpha = if (enPendientes) 1f else 0.7f
+            setTextColor(getColor(if (enPendientes) R.color.sobre_tab_on else R.color.texto))
         }
         findViewById<TextView>(R.id.tvTabRecordatorios).apply {
             // Solo muestra la cantidad cuando no hay ninguno: "(0)".
             text = if (Repositorio.todos(this@MainActivity).isEmpty()) "Recordatorios (0)" else "Recordatorios"
-            alpha = if (enPendientes) 0.7f else 1f
+            setTextColor(getColor(if (enPendientes) R.color.texto else R.color.sobre_tab_on))
         }
+        findViewById<View>(R.id.semana).visibility = if (enPendientes) View.GONE else View.VISIBLE
+        findViewById<View>(R.id.tvSemana).visibility = if (enPendientes) View.GONE else View.VISIBLE
     }
 
     private fun mostrarPendientes() {
@@ -571,6 +677,9 @@ class MainActivity : Activity() {
             val v = layoutInflater.inflate(R.layout.item_recordatorio, cont, false)
             v.findViewById<TextView>(R.id.titulo).text = p.titulo
             v.findViewById<TextView>(R.id.detalle).text = "Cargado el " + Formato.completo(p.creado)
+            v.findViewById<View>(R.id.linea).visibility = View.INVISIBLE
+            v.findViewById<View>(R.id.punto).backgroundTintList =
+                android.content.res.ColorStateList.valueOf(getColor(R.color.texto3))
             if (p.nota.isNotBlank()) v.findViewById<TextView>(R.id.nota).apply { text = p.nota; visibility = View.VISIBLE }
             v.setOnClickListener {
                 startActivity(Intent(this, PendienteActivity::class.java).putExtra(Pendientes.EXTRA_PEND_ID, p.id))
@@ -693,24 +802,42 @@ class MainActivity : Activity() {
         return partes.joinToString("\n")
     }
 
-    private fun agregarItem(r: Recordatorio, pospuesto: Boolean = false) {
+    /**
+     * [conHora]: agrupado por día (muestra la hora arriba y un detalle corto). [conLinea]: línea de tiempo
+     * hacia el siguiente del mismo día. [tono]: color del punto (verde azulado, rojo para vencidos, gris…).
+     */
+    private fun agregarItem(r: Recordatorio, pospuesto: Boolean = false, conHora: Boolean = false,
+                            conLinea: Boolean = false, tono: Int = R.color.acento) {
         val v = layoutInflater.inflate(R.layout.item_recordatorio, lista, false)
         v.findViewById<TextView>(R.id.titulo).text =
             r.titulo
-        v.findViewById<TextView>(R.id.detalle).text = when {
+        v.findViewById<View>(R.id.linea).visibility = if (conLinea) View.VISIBLE else View.INVISIBLE
+        v.findViewById<View>(R.id.punto).backgroundTintList =
+            android.content.res.ColorStateList.valueOf(getColor(tono))
+        if (conHora) v.findViewById<TextView>(R.id.hora).apply { text = Formato.hora(r.proxima); visibility = View.VISIBLE }
+        val etiquetas = v.findViewById<LinearLayout>(R.id.etiquetas)
+        if (r.alarma) etiqueta(etiquetas, "Alarma", R.color.chip_alarma_fondo, R.color.chip_alarma)
+        Formato.repeticionCorta(r).takeIf { it.isNotEmpty() }?.let { etiqueta(etiquetas, it, R.color.chip_rep_fondo, R.color.chip_rep) }
+        if (runCatching { Envios.destinatarios(this, r).isNotEmpty() }.getOrDefault(false))
+            etiqueta(etiquetas, "Avisa a contactos", R.color.chip_cont_fondo, R.color.chip_cont)
+        if (r.sinSms) etiqueta(etiquetas, "SMS anulado", R.color.chip_gris_fondo, R.color.chip_gris)
+        val tvDetalle = v.findViewById<TextView>(R.id.detalle)
+        tvDetalle.text = when {
             pospuesto -> "Pospuesto hasta el " + Formato.completo(r.pospuestoHasta)
             r.cumplido -> "Cumplido el ${Formato.completo(r.cumplidoEn)} · ocurrencia del ${Formato.completo(r.ocurrencia)}"
+            conHora -> Formato.extra(r).removePrefix(" · ")
             else -> Formato.detalle(r)
         } + (if (r.archivado) " · Archivado" else "")
+        if (tvDetalle.text.isNullOrBlank()) tvDetalle.visibility = View.GONE
         if (pospuesto) v.setPadding(v.paddingLeft * 3, v.paddingTop, v.paddingRight, v.paddingBottom)
         else if (!r.activo && !r.cumplido) v.alpha = 0.55f
         // "Hecho" en la notificación: marca para revisar y confirmar el cumplimiento.
         if (r.revisar && !r.cumplido) {
-            v.setBackgroundColor(0x33FFB300)
+            v.setBackgroundColor(getColor(R.color.revisar))
             v.findViewById<TextView>(R.id.titulo).text = "⚑ " + r.titulo
             v.findViewById<TextView>(R.id.detalle).append("\nRevisar: se marcó «Hecho». ¿Lo das por cumplido?")
         }
-        if (modoSeleccion && r.id in seleccionados) v.setBackgroundColor(0x553D7BFD)
+        if (modoSeleccion && r.id in seleccionados) v.setBackgroundColor(getColor(R.color.seleccion))
         val nota = textoNota(r, pospuesto)
         if (nota.isNotEmpty()) {
             val clave = r.id.toString()

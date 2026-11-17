@@ -1,7 +1,83 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- Tema del sistema: toma los colores del celular y el modo claro/oscuro. -->
-    <style name="Tema" parent="android:Theme.DeviceDefault.DayNight" />
+    <!-- Base del diseño "Agenda": claro u oscuro según el tema elegido en Ajustes (o el del sistema). -->
+    <style name="TemaBase" parent="android:Theme.DeviceDefault.DayNight">
+        <item name="android:colorBackground">@color/fondo</item>
+        <item name="android:windowBackground">@color/fondo</item>
+        <item name="android:colorPrimary">@color/acento</item>
+        <item name="android:colorAccent">@color/acento</item>
+        <item name="android:colorControlActivated">@color/acento</item>
+        <item name="android:colorControlNormal">@color/texto2</item>
+        <item name="android:textColorPrimary">@color/texto</item>
+        <item name="android:textColorSecondary">@color/texto2</item>
+        <item name="android:textColorTertiary">@color/texto3</item>
+        <item name="android:textColorHint">@color/texto3</item>
+        <item name="android:statusBarColor">@color/fondo</item>
+        <item name="android:navigationBarColor">@color/fondo</item>
+        <item name="android:windowLightStatusBar">@bool/barras_claras</item>
+        <item name="android:windowLightNavigationBar">@bool/barras_claras</item>
+        <item name="android:actionBarStyle">@style/BarraSuperior</item>
+        <item name="android:buttonStyle">@style/Boton</item>
+        <item name="android:editTextStyle">@style/Campo</item>
+        <item name="android:spinnerStyle">@style/Selector</item>
+    </style>
+
+    <style name="Tema" parent="TemaBase" />
+
+    <style name="BarraSuperior" parent="android:Widget.DeviceDefault.ActionBar.Solid">
+        <item name="android:background">@color/fondo</item>
+        <item name="android:elevation">0dp</item>
+        <item name="android:titleTextStyle">@style/BarraSuperior.Titulo</item>
+    </style>
+    <style name="BarraSuperior.Titulo" parent="android:TextAppearance.DeviceDefault.Widget.ActionBar.Title">
+        <item name="android:textColor">@color/texto</item>
+        <item name="android:textSize">22sp</item>
+        <item name="android:textStyle">bold</item>
+    </style>
+
+    <!-- Botones: tonal (por defecto), principal, chip y de peligro. -->
+    <style name="Boton" parent="android:Widget.DeviceDefault.Button">
+        <item name="android:background">@drawable/boton</item>
+        <item name="android:textColor">@color/texto</item>
+        <item name="android:textAllCaps">false</item>
+        <item name="android:textSize">15sp</item>
+        <item name="android:fontFamily">sans-serif-medium</item>
+        <item name="android:minHeight">48dp</item>
+        <item name="android:paddingStart">16dp</item>
+        <item name="android:paddingEnd">16dp</item>
+        <item name="android:stateListAnimator">@null</item>
+    </style>
+    <style name="Boton.Principal">
+        <item name="android:background">@drawable/boton_principal</item>
+        <item name="android:textColor">@color/sobre_acento</item>
+        <item name="android:textStyle">bold</item>
+        <item name="android:minHeight">54dp</item>
+    </style>
+    <style name="Boton.Chip">
+        <item name="android:background">@drawable/chip</item>
+        <item name="android:textSize">13sp</item>
+        <item name="android:minHeight">40dp</item>
+        <item name="android:minWidth">0dp</item>
+        <item name="android:paddingStart">14dp</item>
+        <item name="android:paddingEnd">14dp</item>
+    </style>
+    <style name="Boton.Peligro">
+        <item name="android:textColor">@color/rojo</item>
+    </style>
+
+    <style name="Campo" parent="android:Widget.DeviceDefault.EditText">
+        <item name="android:background">@drawable/campo</item>
+        <item name="android:paddingStart">14dp</item>
+        <item name="android:paddingEnd">14dp</item>
+        <item name="android:paddingTop">12dp</item>
+        <item name="android:paddingBottom">12dp</item>
+        <item name="android:textColor">@color/texto</item>
+        <item name="android:textColorHint">@color/texto3</item>
+    </style>
+    <style name="Selector" parent="android:Widget.DeviceDefault.Spinner">
+        <item name="android:background">@drawable/campo</item>
+        <item name="android:minHeight">48dp</item>
+    </style>
 
     <!-- Para la ventanita de "Posponer…": solo se ve el diálogo. -->
     <style name="TemaTransparente" parent="android:Theme.Translucent.NoTitleBar">

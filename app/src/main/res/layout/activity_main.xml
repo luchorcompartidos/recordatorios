@@ -1,16 +1,22 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- Pantalla principal con el diseño "Agenda": tira de la semana, pestañas tipo píldora,
+     barra de chips (filtro, orden, secciones, notas, SMS) y lista por día con línea de tiempo. -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
+    android:background="@color/fondo"
     android:orientation="vertical">
 
     <TextView
         android:id="@+id/aviso"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:background="#FFF4CE"
+        android:layout_marginHorizontal="16dp"
+        android:layout_marginBottom="8dp"
+        android:background="@drawable/boton"
+        android:backgroundTint="@color/aviso_fondo"
         android:padding="14dp"
-        android:textColor="#5C4400"
+        android:textColor="@color/aviso_texto"
         android:textSize="15sp"
         android:visibility="gone" />
 
@@ -19,66 +25,77 @@
         android:id="@+id/avisoVersion"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:background="#F59E0B"
+        android:layout_marginHorizontal="16dp"
+        android:layout_marginBottom="8dp"
+        android:background="@drawable/boton_principal"
         android:padding="12dp"
-        android:textColor="#1C1F26"
+        android:textColor="@color/sobre_acento"
         android:textSize="15sp"
         android:textStyle="bold"
         android:visibility="gone" />
 
-    <!-- Pestañas: Pendientes (primera) y Recordatorios -->
+    <!-- Tira de la semana: tocar un día filtra por ese día; tocarlo de nuevo vuelve a "Todos". -->
+    <TextView
+        android:id="@+id/tvSemana"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:paddingHorizontal="20dp"
+        android:paddingTop="2dp"
+        android:textColor="@color/texto2"
+        android:textSize="13sp"
+        android:fontFamily="sans-serif-medium" />
+
+    <LinearLayout
+        android:id="@+id/semana"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:paddingHorizontal="14dp"
+        android:paddingVertical="8dp" />
+
+    <!-- Pestañas: Pendientes y Recordatorios (píldoras) -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:orientation="horizontal">
+        android:orientation="horizontal"
+        android:paddingHorizontal="16dp"
+        android:paddingBottom="4dp">
 
         <LinearLayout
             android:id="@+id/tabPendientes"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:background="?android:attr/selectableItemBackground"
-            android:orientation="vertical">
+            android:layout_width="wrap_content"
+            android:layout_height="40dp"
+            android:layout_marginEnd="8dp"
+            android:background="@drawable/chip"
+            android:gravity="center"
+            android:orientation="vertical"
+            android:paddingHorizontal="16dp">
 
             <TextView
                 android:id="@+id/tvTabPendientes"
-                android:layout_width="match_parent"
+                android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:gravity="center"
-                android:paddingVertical="12dp"
+                android:fontFamily="sans-serif-medium"
                 android:text="Pendientes (0)"
-                android:textSize="15sp" />
-
-            <View
-                android:id="@+id/indPendientes"
-                android:layout_width="match_parent"
-                android:layout_height="3dp"
-                android:background="?android:attr/colorAccent" />
+                android:textSize="14sp" />
         </LinearLayout>
 
         <LinearLayout
             android:id="@+id/tabRecordatorios"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:background="?android:attr/selectableItemBackground"
-            android:orientation="vertical">
+            android:layout_width="wrap_content"
+            android:layout_height="40dp"
+            android:background="@drawable/chip_on"
+            android:gravity="center"
+            android:orientation="vertical"
+            android:paddingHorizontal="16dp">
 
             <TextView
                 android:id="@+id/tvTabRecordatorios"
-                android:layout_width="match_parent"
+                android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:gravity="center"
-                android:paddingVertical="12dp"
+                android:fontFamily="sans-serif-medium"
                 android:text="Recordatorios"
-                android:textSize="16sp"
-                android:textStyle="bold" />
-
-            <View
-                android:id="@+id/indRecordatorios"
-                android:layout_width="match_parent"
-                android:layout_height="3dp"
-                android:background="?android:attr/colorAccent" />
+                android:textSize="14sp" />
         </LinearLayout>
     </LinearLayout>
 
@@ -101,16 +118,17 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:orientation="vertical"
-                android:padding="8dp" />
+                android:paddingHorizontal="16dp"
+                android:paddingTop="8dp" />
         </ScrollView>
 
         <Button
             android:id="@+id/btnNuevoPendiente"
+            style="@style/Boton.Principal"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_margin="16dp"
-            android:text="Carga de «Pendiente»"
-            android:textSize="16sp" />
+            android:text="+ Carga de «Pendiente»" />
     </LinearLayout>
 
     <!-- ===================== Pestaña RECORDATORIOS ===================== -->
@@ -121,136 +139,108 @@
         android:layout_weight="1"
         android:orientation="vertical">
 
-        <!-- Franja independiente de SMS -->
-        <LinearLayout
+        <!-- Barra de chips: filtro, orden, secciones, notas y SMS (se desliza a los costados) -->
+        <HorizontalScrollView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:background="#1E1E1E"
-            android:orientation="vertical">
+            android:clipToPadding="false"
+            android:paddingHorizontal="16dp"
+            android:paddingVertical="8dp"
+            android:scrollbars="none">
 
-            <Button
-                android:id="@+id/btnSms"
-                style="?android:attr/borderlessButtonStyle"
-                android:layout_width="match_parent"
+            <LinearLayout
+                android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="Suspender/Anular SMS"
-                android:textColor="#FFD54F"
-                android:textStyle="bold" />
+                android:orientation="horizontal">
 
-            <TextView
-                android:id="@+id/avisoSms"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:background="#B3261E"
-                android:gravity="center"
-                android:padding="10dp"
-                android:text="Envíos SMS se encuentran SUSPENDIDOS/ANULADOS"
-                android:textColor="#FFFFFF"
-                android:textSize="15sp"
-                android:textStyle="bold"
-                android:visibility="gone" />
-        </LinearLayout>
+                <Button
+                    android:id="@+id/btnFiltro"
+                    style="@style/Boton.Chip"
+                    android:layout_width="wrap_content"
+                    android:layout_height="40dp"
+                    android:layout_marginEnd="8dp"
+                    android:text="⏷ Filtro: Todos" />
 
-        <!-- Panel de vista: colapsar/expandir y notas -->
-        <LinearLayout
+                <Button
+                    android:id="@+id/btnOrden"
+                    style="@style/Boton.Chip"
+                    android:layout_width="wrap_content"
+                    android:layout_height="40dp"
+                    android:layout_marginEnd="8dp"
+                    android:text="⇅ Orden" />
+
+                <Button
+                    android:id="@+id/btnSecciones"
+                    style="@style/Boton.Chip"
+                    android:layout_width="wrap_content"
+                    android:layout_height="40dp"
+                    android:layout_marginEnd="8dp"
+                    android:text="Secciones ▾" />
+
+                <Button
+                    android:id="@+id/btnSubsecciones"
+                    style="@style/Boton.Chip"
+                    android:layout_width="wrap_content"
+                    android:layout_height="40dp"
+                    android:layout_marginEnd="8dp"
+                    android:text="Subsecciones ▾" />
+
+                <Button
+                    android:id="@+id/btnNotas"
+                    style="@style/Boton.Chip"
+                    android:layout_width="wrap_content"
+                    android:layout_height="40dp"
+                    android:layout_marginEnd="8dp"
+                    android:text="Ocultar notas" />
+
+                <Button
+                    android:id="@+id/btnSms"
+                    style="@style/Boton.Chip"
+                    android:layout_width="wrap_content"
+                    android:layout_height="40dp"
+                    android:text="Suspender/Anular SMS" />
+            </LinearLayout>
+        </HorizontalScrollView>
+
+        <TextView
+            android:id="@+id/avisoSms"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:orientation="horizontal"
-            android:paddingHorizontal="12dp"
-            android:paddingTop="8dp">
-
-            <Button
-                android:id="@+id/btnSecciones"
-                android:layout_width="0dp"
-                android:layout_height="40dp"
-                android:layout_marginEnd="6dp"
-                android:layout_weight="1"
-                android:background="@drawable/boton_borde"
-                android:text="Secciones ▾"
-                android:textAllCaps="false" />
-
-            <Button
-                android:id="@+id/btnSubsecciones"
-                android:layout_width="0dp"
-                android:layout_height="40dp"
-                android:layout_marginStart="6dp"
-                android:layout_weight="1"
-                android:background="@drawable/boton_borde"
-                android:text="Subsecciones ▾"
-                android:textAllCaps="false" />
-        </LinearLayout>
-
-        <Button
-            android:id="@+id/btnNotas"
-            android:layout_width="match_parent"
-            android:layout_height="40dp"
-            android:layout_marginHorizontal="12dp"
-            android:layout_marginTop="8dp"
-            android:background="@drawable/boton_borde"
-            android:text="Ocultar notas"
-            android:textAllCaps="false" />
-
-        <!-- Divisoria sutil -->
-        <View
-            android:layout_width="match_parent"
-            android:layout_height="1dp"
-            android:layout_marginHorizontal="12dp"
-            android:layout_marginTop="10dp"
-            android:background="#33888888" />
-
-        <!-- Filtro y Orden -->
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="horizontal"
-            android:paddingHorizontal="12dp"
-            android:paddingVertical="8dp">
-
-            <Button
-                android:id="@+id/btnFiltro"
-                android:layout_width="0dp"
-                android:layout_height="40dp"
-                android:layout_marginEnd="6dp"
-                android:layout_weight="1.4"
-                android:background="@drawable/boton_tonal"
-                android:text="⏷ Filtro: Todos"
-                android:textAllCaps="false" />
-
-            <Button
-                android:id="@+id/btnOrden"
-                android:layout_width="0dp"
-                android:layout_height="40dp"
-                android:layout_marginStart="6dp"
-                android:layout_weight="1"
-                android:background="@drawable/boton_tonal"
-                android:text="⇅ Orden"
-                android:textAllCaps="false" />
-        </LinearLayout>
+            android:layout_marginHorizontal="16dp"
+            android:layout_marginBottom="6dp"
+            android:background="@drawable/boton"
+            android:backgroundTint="@color/rojo_suave"
+            android:gravity="center"
+            android:padding="10dp"
+            android:text="Envíos SMS se encuentran SUSPENDIDOS/ANULADOS"
+            android:textColor="@color/rojo"
+            android:textSize="14sp"
+            android:textStyle="bold"
+            android:visibility="gone" />
 
         <TextView
             android:id="@+id/avisoFiltro"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:background="?android:attr/colorAccent"
+            android:layout_marginHorizontal="16dp"
+            android:layout_marginBottom="6dp"
+            android:background="@drawable/boton"
+            android:backgroundTint="@color/acento_suave"
             android:gravity="center"
-            android:padding="6dp"
-            android:textColor="#FFFFFF"
+            android:padding="8dp"
+            android:textColor="@color/texto"
+            android:textSize="13sp"
             android:visibility="gone" />
-
-        <!-- Divisoria marcada: fin del encabezado -->
-        <View
-            android:layout_width="match_parent"
-            android:layout_height="2dp"
-            android:background="#888888" />
 
         <LinearLayout
             android:id="@+id/barraSeleccion"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:background="#333D7BFD"
+            android:layout_marginHorizontal="16dp"
+            android:background="@drawable/boton"
             android:gravity="center_vertical"
             android:orientation="horizontal"
-            android:paddingHorizontal="12dp"
+            android:paddingStart="14dp"
             android:visibility="gone">
 
             <TextView
@@ -265,6 +255,8 @@
                 style="?android:attr/borderlessButtonStyle"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
+                android:textAllCaps="false"
+                android:textColor="@color/acento"
                 android:text="Acciones ▾" />
 
             <Button
@@ -272,6 +264,8 @@
                 style="?android:attr/borderlessButtonStyle"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
+                android:textAllCaps="false"
+                android:textColor="@color/texto2"
                 android:text="Cancelar" />
         </LinearLayout>
 
@@ -285,15 +279,16 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:orientation="vertical"
-                android:padding="8dp" />
+                android:paddingHorizontal="16dp"
+                android:paddingBottom="8dp" />
         </ScrollView>
 
         <Button
             android:id="@+id/btnNuevo"
+            style="@style/Boton.Principal"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_margin="16dp"
-            android:text="+ Nuevo recordatorio"
-            android:textSize="16sp" />
+            android:text="+ Nuevo recordatorio" />
     </LinearLayout>
 </LinearLayout>

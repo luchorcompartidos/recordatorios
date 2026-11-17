@@ -7,7 +7,7 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="vertical"
-        android:padding="16dp">
+        android:padding="20dp">
 
         <EditText
             android:id="@+id/etTitulo"
@@ -21,7 +21,7 @@
             android:id="@+id/etNota"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
+            android:layout_marginTop="12dp"
             android:hint="Nota (opcional)"
             android:inputType="textCapSentences|textMultiLine"
             android:minLines="2" />
@@ -31,6 +31,7 @@
             android:layout_height="wrap_content"
             android:layout_marginTop="20dp"
             android:text="Fecha y hora"
+            android:textColor="@color/texto2"
             android:textStyle="bold" />
 
         <LinearLayout
@@ -120,6 +121,7 @@
 
         <Button
             android:id="@+id/btnGuardar"
+            style="@style/Boton.Principal"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="28dp"
@@ -135,6 +137,7 @@
 
         <Button
             android:id="@+id/btnBorrar"
+            style="@style/Boton.Peligro"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="8dp"

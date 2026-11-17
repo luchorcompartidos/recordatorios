@@ -310,6 +310,28 @@ fun Activity.elegirHora(inicial: LocalTime, alCancelar: () -> Unit = {}, alElegi
 const val EXTRA_FOCO_SMS = "foco_sms"
 
 /** Ajustes generales. */
+/** Tema de la app: según el sistema (por defecto), claro u oscuro fijo. Android lo recuerda entre reinicios. */
+object Apariencia {
+    const val SISTEMA = "sistema"; const val CLARO = "claro"; const val OSCURO = "oscuro"
+    val OPCIONES = listOf(SISTEMA to "Según el sistema", CLARO to "Claro", OSCURO to "Oscuro")
+    private fun prefs(ctx: Context) = ctx.getSharedPreferences("ajustes", Context.MODE_PRIVATE)
+    fun modo(ctx: Context): String = prefs(ctx).getString("tema", SISTEMA) ?: SISTEMA
+    fun texto(modo: String) = OPCIONES.firstOrNull { it.first == modo }?.second ?: OPCIONES[0].second
+    fun elegir(ctx: Context, modo: String) {
+        prefs(ctx).edit().putString("tema", modo).apply()
+        aplicar(ctx)
+    }
+    /** Aplica el tema guardado (no hace nada si ya está aplicado). */
+    fun aplicar(ctx: Context) {
+        val m = when (modo(ctx)) {
+            CLARO -> android.app.UiModeManager.MODE_NIGHT_NO
+            OSCURO -> android.app.UiModeManager.MODE_NIGHT_YES
+            else -> android.app.UiModeManager.MODE_NIGHT_AUTO
+        }
+        ctx.getSystemService(android.app.UiModeManager::class.java)?.setApplicationNightMode(m)
+    }
+}
+
 class AjustesActivity : Activity() {
     private lateinit var estadoCopia: TextView
 
@@ -330,6 +352,21 @@ class AjustesActivity : Activity() {
         fun texto(t: String) = TextView(this).also { it.text = t; raiz.addView(it) }
         fun boton(t: String, accion: (Button) -> Unit) =
             Button(this).also { b -> b.text = t; b.setOnClickListener { accion(b) }; raiz.addView(b) }
+
+        seccion("APARIENCIA")
+        boton("Tema: " + Apariencia.texto(Apariencia.modo(this))) { b ->
+            val actual = Apariencia.OPCIONES.indexOfFirst { it.first == Apariencia.modo(this) }
+            AlertDialog.Builder(this, temaDialogo())
+                .setTitle("Tema")
+                .setSingleChoiceItems(Apariencia.OPCIONES.map { it.second }.toTypedArray(), actual) { d, i ->
+                    d.dismiss()
+                    b.text = "Tema: " + Apariencia.OPCIONES[i].second
+                    Apariencia.elegir(this, Apariencia.OPCIONES[i].first)   // la pantalla se redibuja con el tema nuevo
+                }
+                .setNegativeButton("Cancelar", null)
+                .show()
+        }
+        texto("«Según el sistema» sigue el modo claro u oscuro del celular. «Claro» y «Oscuro» lo fijan solo para esta app.")
 
         seccion("ALARMA SONORA")
         raiz.addView(Switch(this).apply {

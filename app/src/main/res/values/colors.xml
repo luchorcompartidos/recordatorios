@@ -1,4 +1,32 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- Paleta del diseño "Agenda" (tema claro). Los nombres son iguales en las dos paletas. -->
 <resources>
     <color name="fondo_icono">#1F6FEB</color>
+    <color name="fondo">#FFFFFF</color>
+    <color name="superficie">#F1F5F4</color>
+    <color name="borde">#D1D5DB</color>
+    <color name="texto">#111827</color>
+    <color name="texto2">#4B5563</color>
+    <color name="texto3">#6B7280</color>
+    <color name="acento">#0F766E</color>
+    <color name="sobre_acento">#FFFFFF</color>
+    <color name="acento_suave">#CCFBF1</color>
+    <color name="linea">#D5E3E1</color>
+    <color name="rojo">#B91C1C</color>
+    <color name="rojo_suave">#FEE2E2</color>
+    <color name="tab_on">#111827</color>
+    <color name="sobre_tab_on">#FFFFFF</color>
+    <color name="chip_alarma_fondo">#FEF3C7</color>
+    <color name="chip_alarma">#92400E</color>
+    <color name="chip_rep_fondo">#DBEAFE</color>
+    <color name="chip_rep">#1E40AF</color>
+    <color name="chip_cont_fondo">#DCFCE7</color>
+    <color name="chip_cont">#166534</color>
+    <color name="chip_gris_fondo">#E5E7EB</color>
+    <color name="chip_gris">#374151</color>
+    <color name="aviso_fondo">#FEF3C7</color>
+    <color name="aviso_texto">#78350F</color>
+    <color name="seleccion">#330F766E</color>
+    <color name="revisar">#33F59E0B</color>
+    <bool name="barras_claras">true</bool>
 </resources>
