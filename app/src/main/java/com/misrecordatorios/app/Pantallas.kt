@@ -363,6 +363,18 @@ class MainActivity : Activity() {
         actualizarSms()
         revisarPermisos()
         mostrarLista()
+        mostrarAvisoVersion()
+        VersionGitHub.consultar(this) { if (!isFinishing) mostrarAvisoVersion() }
+    }
+
+    /** Franja "Hay una versión nueva": al tocarla abre el diálogo con la descarga del instalador. */
+    private fun mostrarAvisoVersion() {
+        val v = findViewById<TextView>(R.id.avisoVersion)
+        val n = VersionGitHub.nueva(this)
+        if (n == null) { v.visibility = View.GONE; return }
+        v.text = "Hay una versión nueva (${n.tag}). Tocá acá para descargar el instalador."
+        v.visibility = View.VISIBLE
+        v.setOnClickListener { VersionGitHub.dialogo(this, temaDialogo()) }
     }
 
     override fun onRequestPermissionsResult(codigo: Int, permisos: Array<out String>, resultados: IntArray) {

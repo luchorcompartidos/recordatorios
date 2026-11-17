@@ -1,10 +1,13 @@
 name: Compilar APK
 
-# Esquema de versiones (solo para este repo):
-#   - Sin marca en el commit:   compila de prueba, NO publica Release (el APK queda en Actions > Artifacts).
-#   - "[minor]" en el mensaje:  sube el 3er número  -> v1.1.0, v1.1.1, v1.1.2 ...
-#   - "[major]" en el mensaje:  sube el 2do número  -> v1.2.0 (y el 3ro vuelve a 0)
-# La primera versión publicada con este esquema es v1.1.0 (las anteriores eran v1.0.N).
+# Estándar de versiones de la caja de apps (SemVer, siempre tres números):
+#   - Sin marca en el commit (o "[skip release]"): compila de prueba, NO publica Release
+#     (el APK queda en Actions > Artifacts).
+#   - "[patch]" en el mensaje:  v1.1.1 -> v1.1.2
+#   - "[minor]" en el mensaje:  v1.1.2 -> v1.2.0
+#   - "[major]" en el mensaje:  v1.2.0 -> v2.0.0
+# El número va compilado en la app (versionName). La app lee las Releases para mostrar el
+# Changelog y avisar si hay una versión nueva, con link al instalador (.apk adjunto).
 
 on:
   push:
@@ -14,7 +17,7 @@ on:
       marca:
         description: 'Tipo de versión'
         type: choice
-        options: [ prueba, minor, major ]
+        options: [ prueba, patch, minor, major ]
         default: prueba
 
 permissions:
@@ -37,20 +40,24 @@ jobs:
           MSG: ${{ github.event.head_commit.message }}
           MARCA: ${{ inputs.marca }}
         run: |
-          if   [ "$MARCA" = "major" ] || grep -q '\[major\]' <<< "$MSG"; then tipo=major
-          elif [ "$MARCA" = "minor" ] || grep -q '\[minor\]' <<< "$MSG"; then tipo=minor
+          if grep -q '\[skip release\]' <<< "$MSG" && [ -z "$MARCA" ]; then tipo=prueba
+          elif [ "$MARCA" = "major" ] || { [ -z "$MARCA" ] && grep -q '\[major\]' <<< "$MSG"; }; then tipo=major
+          elif [ "$MARCA" = "minor" ] || { [ -z "$MARCA" ] && grep -q '\[minor\]' <<< "$MSG"; }; then tipo=minor
+          elif [ "$MARCA" = "patch" ] || { [ -z "$MARCA" ] && grep -q '\[patch\]' <<< "$MSG"; }; then tipo=patch
           else tipo=prueba
           fi
           last=$(git tag -l 'v*' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -1)
           IFS=. read -r X Y Z <<< "${last#v}"
           if [ "$tipo" = "prueba" ]; then
             echo "Compilación de prueba: no se publica Release."
-          elif [ -z "$last" ] || [ "$X.$Y" = "1.0" ]; then
-            next="1.1.0"
-          elif [ "$tipo" = "major" ]; then
-            next="$X.$((Y+1)).0"
+          elif [ -z "$last" ]; then
+            next="0.1.0"
           else
-            next="$X.$Y.$((Z+1))"
+            case "$tipo" in
+              major) next="$((X+1)).0.0" ;;
+              minor) next="$X.$((Y+1)).0" ;;
+              patch) next="$X.$Y.$((Z+1))" ;;
+            esac
           fi
           echo "TIPO=$tipo" >> "$GITHUB_ENV"
           [ -n "$next" ] && echo "VERSION_NAME=$next" >> "$GITHUB_ENV"
@@ -100,5 +107,5 @@ jobs:
           git push origin "v$V"
           gh release create "v$V" "recordatorios-$V.apk" \
             --title "Recordatorios $V" \
-            --notes "$(git log -1 --pretty=%s | sed -E 's/ *\[(minor|major)\]//g')" \
+            --notes "$(git log -1 --pretty=%s | sed -E 's/ *\[(patch|minor|major)\]//g')" \
             --latest

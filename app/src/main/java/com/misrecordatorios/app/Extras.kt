@@ -447,8 +447,21 @@ class AjustesActivity : Activity() {
         }
 
         seccion("ACERCA DE")
-        val version = runCatching { packageManager.getPackageInfo(packageName, 0).versionName }.getOrNull() ?: "?"
-        texto("Versión instalada: $version")
+        val version = VersionGitHub.instalada(this)
+        val estadoVersion = texto("Versión instalada: $version")
+        fun refrescarVersion() {
+            val n = VersionGitHub.nueva(this)
+            val ult = VersionGitHub.guardadas(this).firstOrNull()
+            estadoVersion.text = "Versión instalada: $version" + when {
+                n != null -> "\nHay una versión nueva: ${n.tag} (${VersionGitHub.fecha(n.fecha)})"
+                ult != null -> "\nÚltima publicada: ${ult.tag} (${VersionGitHub.fecha(ult.fecha)})"
+                else -> ""
+            }
+        }
+        refrescarVersion()
+        VersionGitHub.consultar(this) { if (!isFinishing) refrescarVersion() }
+        boton("Versión y actualizaciones") { VersionGitHub.consultar(this, forzar = true) { if (!isFinishing) { refrescarVersion(); VersionGitHub.dialogo(this, temaDialogo()) } } }
+        boton("Descargar instalador de la última versión") { VersionGitHub.descargar(this, VersionGitHub.guardadas(this).firstOrNull()) }
         boton("Ver cambios (ChangeLog)") {
             AlertDialog.Builder(this, temaDialogo())
                 .setTitle("Historial de cambios")
