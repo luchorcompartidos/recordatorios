@@ -62,6 +62,25 @@
             android:textColor="@color/texto"
             android:textSize="26sp" />
 
+        <!-- Desplazar la tira de la semana (también se puede deslizar con el dedo) -->
+        <ImageButton
+            android:id="@+id/btnSemAnt"
+            android:layout_width="44dp"
+            android:layout_height="44dp"
+            android:layout_marginEnd="6dp"
+            android:background="@drawable/dia"
+            android:contentDescription="Días anteriores"
+            android:src="@drawable/ic_ant" />
+
+        <ImageButton
+            android:id="@+id/btnSemSig"
+            android:layout_width="44dp"
+            android:layout_height="44dp"
+            android:layout_marginEnd="6dp"
+            android:background="@drawable/dia"
+            android:contentDescription="Días siguientes"
+            android:src="@drawable/ic_sig" />
+
         <ImageButton
             android:id="@+id/btnAjustes"
             android:layout_width="44dp"

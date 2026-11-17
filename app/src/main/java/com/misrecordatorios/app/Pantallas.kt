@@ -320,6 +320,19 @@ class MainActivity : Activity() {
         // Diseño "Agenda": el encabezado propio (mes + Ajustes) reemplaza la barra superior.
         actionBar?.hide()
         findViewById<View>(R.id.btnAjustes).setOnClickListener { startActivity(Intent(this, AjustesActivity::class.java)) }
+        findViewById<View>(R.id.btnSemSig).setOnClickListener { moverSemana(+1) }
+        findViewById<View>(R.id.btnSemAnt).setOnClickListener { moverSemana(-1) }
+        // Deslizar la tira con el dedo: hacia la izquierda avanza, hacia la derecha vuelve.
+        val gestos = android.view.GestureDetector(this, object : android.view.GestureDetector.SimpleOnGestureListener() {
+            override fun onDown(e: android.view.MotionEvent) = true
+            override fun onFling(e1: android.view.MotionEvent?, e2: android.view.MotionEvent, vx: Float, vy: Float): Boolean {
+                val dx = e2.x - (e1?.x ?: e2.x)
+                if (kotlin.math.abs(dx) < 80 || kotlin.math.abs(vx) < kotlin.math.abs(vy)) return false
+                moverSemana(if (dx < 0) +1 else -1); return true
+            }
+        })
+        toqueSemana = android.view.View.OnTouchListener { _, ev -> gestos.onTouchEvent(ev); false }
+        findViewById<View>(R.id.semana).setOnTouchListener { _, ev -> gestos.onTouchEvent(ev) }
         findViewById<Button>(R.id.btnNuevo).setOnClickListener {
             startActivity(Intent(this, EditarActivity::class.java))
         }
@@ -494,13 +507,37 @@ class MainActivity : Activity() {
         lista.addView(v)
     }
 
-    /** Tira de 7 días desde hoy: tocar un día filtra por ese día; tocarlo de nuevo vuelve a "Todos". */
+    /**
+     * Desplazamiento de la tira (en días desde hoy). 0 = vista inicial: 7 días desde hoy.
+     * Desplazada: 6 días desde [inicioSemana] y, en el último lugar, el botón «Volver a Hoy».
+     */
+    private var inicioSemana = 0
+    private var toqueSemana: android.view.View.OnTouchListener? = null
+
+    private fun moverSemana(sentido: Int) {
+        inicioSemana = when {
+            sentido > 0 && inicioSemana == 0 -> 7          // después de los 7 días iniciales
+            sentido > 0 -> inicioSemana + 6
+            inicioSemana - 6 < 7 -> 0                        // vuelve a la vista inicial
+            else -> inicioSemana - 6
+        }
+        armarSemana()
+    }
+
+    /** Tira de días: tocar un día filtra por ese día; tocarlo de nuevo vuelve a "Todos". */
     private fun armarSemana() {
         val cont = findViewById<LinearLayout>(R.id.semana)
         cont.removeAllViews()
         val hoy = LocalDate.now()
-        findViewById<TextView>(R.id.tvSemana).text = hoy.format(
-            java.time.format.DateTimeFormatter.ofPattern("MMMM yyyy", locAr)).replaceFirstChar { it.titlecase(locAr) }
+        val desplazada = inicioSemana > 0
+        val cantidad = if (desplazada) 6 else 7
+        val primero = hoy.plusDays(inicioSemana.toLong())
+        val ultimo = primero.plusDays((cantidad - 1).toLong())
+        val fMes = java.time.format.DateTimeFormatter.ofPattern(if (primero.year == hoy.year) "MMMM" else "MMMM yyyy", locAr)
+        findViewById<TextView>(R.id.tvSemana).text = (if (primero.month == ultimo.month) primero.format(fMes)
+            else primero.format(java.time.format.DateTimeFormatter.ofPattern("MMM", locAr)).trimEnd('.') + " – " + ultimo.format(fMes))
+            .replaceFirstChar { it.titlecase(locAr) }
+        findViewById<View>(R.id.btnSemAnt).apply { isEnabled = desplazada; alpha = if (desplazada) 1f else 0.35f }
         val f = vista().getString("filtro", "todos")
         val diaFiltro = if (f == "dia") LocalDate.ofEpochDay(vista().getLong("filtro_dia", hoy.toEpochDay())) else null
         val zona = java.time.ZoneId.systemDefault()
@@ -508,8 +545,9 @@ class MainActivity : Activity() {
             .map { java.time.Instant.ofEpochMilli(it.proxima).atZone(zona).toLocalDate() }.toSet()
         val letras = listOf("L", "M", "M", "J", "V", "S", "D")
         val d = resources.displayMetrics.density
-        for (i in 0..6) {
-            val dia = hoy.plusDays(i.toLong())
+        for (k in 0 until cantidad) {
+            val dia = primero.plusDays(k.toLong())
+            val i = inicioSemana + k   // días desde hoy
             val elegido = dia == diaFiltro || (f == "hoy" && i == 0) || (f == "manana" && i == 1)
             val celda = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
@@ -542,8 +580,29 @@ class MainActivity : Activity() {
                     if (dia in conAlgo) colorTexto else android.graphics.Color.TRANSPARENT)
                 layoutParams = LinearLayout.LayoutParams((5 * d).toInt(), (5 * d).toInt()).apply { topMargin = (3 * d).toInt() }
             })
+            celda.setOnTouchListener(toqueSemana)
             cont.addView(celda)
         }
+        if (desplazada) cont.addView(LinearLayout(this).apply {   // último lugar: «Volver a Hoy»
+            orientation = LinearLayout.VERTICAL
+            gravity = android.view.Gravity.CENTER
+            setBackgroundResource(R.drawable.dia_hoy)
+            minimumHeight = (60 * d).toInt()
+            contentDescription = "Volver a Hoy"
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
+                marginStart = (3 * d).toInt(); marginEnd = (3 * d).toInt()
+            }
+            isClickable = true
+            setOnClickListener { inicioSemana = 0; armarSemana() }
+            setOnTouchListener(toqueSemana)
+            addView(TextView(this@MainActivity).apply {
+                text = "↺"; textSize = 16f; setTextColor(getColor(R.color.acento)); gravity = android.view.Gravity.CENTER
+            })
+            addView(TextView(this@MainActivity).apply {
+                text = "Hoy"; textSize = 12f; setTypeface(typeface, android.graphics.Typeface.BOLD)
+                setTextColor(getColor(R.color.acento)); gravity = android.view.Gravity.CENTER
+            })
+        })
     }
 
     /** Chip "encendido" (relleno suave y texto del color principal) cuando algo modifica la vista de la lista. */
