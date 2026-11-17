@@ -42,15 +42,16 @@
             android:visibility="gone" />
     </LinearLayout>
 
-    <!-- Encabezado: mes y acceso a Ajustes -->
+    <!-- Encabezado del calendario: mes y flechas (solo en la pestaña Recordatorios) -->
     <LinearLayout
+        android:id="@+id/encabezado"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:gravity="center_vertical"
         android:orientation="horizontal"
         android:paddingStart="20dp"
         android:paddingTop="14dp"
-        android:paddingEnd="14dp"
+        android:paddingEnd="16dp"
         android:paddingBottom="4dp">
 
         <TextView
@@ -76,18 +77,9 @@
             android:id="@+id/btnSemSig"
             android:layout_width="44dp"
             android:layout_height="44dp"
-            android:layout_marginEnd="6dp"
             android:background="@drawable/dia"
             android:contentDescription="Días siguientes"
             android:src="@drawable/ic_sig" />
-
-        <ImageButton
-            android:id="@+id/btnAjustes"
-            android:layout_width="44dp"
-            android:layout_height="44dp"
-            android:background="@drawable/dia"
-            android:contentDescription="Ajustes"
-            android:src="@drawable/ic_ajustes" />
     </LinearLayout>
 
     <TextView
@@ -130,8 +122,10 @@
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
+        android:gravity="center_vertical"
         android:orientation="horizontal"
         android:paddingHorizontal="16dp"
+        android:paddingTop="6dp"
         android:paddingBottom="4dp">
 
         <LinearLayout
@@ -170,6 +164,21 @@
                 android:text="Recordatorios"
                 android:textSize="14sp" />
         </LinearLayout>
+
+        <View
+            android:layout_width="0dp"
+            android:layout_height="1dp"
+            android:layout_weight="1" />
+
+        <!-- Ajustes: siempre a la derecha, en la fila de las pestañas -->
+        <ImageButton
+            android:id="@+id/btnAjustes"
+            android:layout_width="44dp"
+            android:layout_height="44dp"
+            android:layout_gravity="center_vertical"
+            android:background="@drawable/dia"
+            android:contentDescription="Ajustes"
+            android:src="@drawable/ic_ajustes" />
     </LinearLayout>
 
     <!-- ===================== Pestaña PENDIENTES ===================== -->

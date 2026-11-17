@@ -32,5 +32,7 @@
     <color name="chip_activo_fondo">#D5F2EC</color>
     <color name="sms_franja">#FFF7E0</color>
     <color name="sms_texto">#92400E</color>
+    <color name="semana_fondo">#DDF1EC</color>
+    <color name="dia_gris">#F1F5F4</color>
     <bool name="barras_claras">true</bool>
 </resources>

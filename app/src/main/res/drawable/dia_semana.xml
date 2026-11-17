@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Día restante de la semana en curso (hasta el domingo). -->
+<ripple xmlns:android="http://schemas.android.com/apk/res/android" android:color="?android:attr/colorControlHighlight">
+    <item><shape android:shape="rectangle"><corners android:radius="14dp" /><solid android:color="@color/semana_fondo" /></shape></item>
+</ripple>

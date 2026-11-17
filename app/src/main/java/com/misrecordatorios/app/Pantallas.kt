@@ -544,6 +544,7 @@ class MainActivity : Activity() {
         val conAlgo = Repositorio.todos(this).filter { it.activo && !it.archivado && !it.cumplido }
             .map { java.time.Instant.ofEpochMilli(it.proxima).atZone(zona).toLocalDate() }.toSet()
         val letras = listOf("L", "M", "M", "J", "V", "S", "D")
+        val finSemana = hoy.plusDays((7 - hoy.dayOfWeek.value).toLong())   // domingo de la semana en curso
         val d = resources.displayMetrics.density
         for (k in 0 until cantidad) {
             val dia = primero.plusDays(k.toLong())
@@ -552,7 +553,15 @@ class MainActivity : Activity() {
             val celda = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
                 gravity = android.view.Gravity.CENTER
-                setBackgroundResource(when { elegido -> R.drawable.dia_on; i == 0 -> R.drawable.dia_hoy; else -> R.drawable.dia })
+                // Hoy > día elegido como filtro > día 1 del mes > resto de la semana en curso > días siguientes (gris).
+                val enSemana = !dia.isAfter(finSemana)
+                setBackgroundResource(when {
+                    elegido -> R.drawable.dia_on
+                    i == 0 -> R.drawable.dia_hoy
+                    dia.dayOfMonth == 1 -> if (enSemana) R.drawable.dia_mes_semana else R.drawable.dia_mes
+                    enSemana -> R.drawable.dia_semana
+                    else -> R.drawable.dia_gris
+                })
                 minimumHeight = (60 * d).toInt()
                 contentDescription = textoDia(dia)
                 layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
@@ -565,7 +574,9 @@ class MainActivity : Activity() {
                     mostrarLista()
                 }
             }
-            val colorTexto = getColor(when { elegido -> R.color.sobre_acento; i == 0 -> R.color.acento; else -> R.color.texto })
+            val colorTexto = getColor(when {
+                elegido -> R.color.sobre_acento; i == 0 -> R.color.acento; dia.dayOfMonth == 1 -> R.color.chip_rep; else -> R.color.texto
+            })
             celda.addView(TextView(this).apply {
                 text = letras[dia.dayOfWeek.value - 1]; textSize = 11f
                 setTextColor(if (elegido) colorTexto else getColor(R.color.texto2)); gravity = android.view.Gravity.CENTER
@@ -736,7 +747,7 @@ class MainActivity : Activity() {
             setTextColor(getColor(if (enPendientes) R.color.texto else R.color.sobre_tab_on))
         }
         findViewById<View>(R.id.semana).visibility = if (enPendientes) View.GONE else View.VISIBLE
-        findViewById<View>(R.id.tvSemana).visibility = if (enPendientes) View.GONE else View.VISIBLE
+        findViewById<View>(R.id.encabezado).visibility = if (enPendientes) View.GONE else View.VISIBLE   // mes y flechas
     }
 
     private fun mostrarPendientes() {
