@@ -28,5 +28,9 @@
     <color name="aviso_texto">#F5D58A</color>
     <color name="seleccion">#552DD4BF</color>
     <color name="revisar">#33F5B544</color>
+    <color name="dia_fondo">#16211F</color>
+    <color name="chip_activo_fondo">#123A36</color>
+    <color name="sms_franja">#1A1F27</color>
+    <color name="sms_texto">#F5B544</color>
     <bool name="barras_claras">false</bool>
 </resources>

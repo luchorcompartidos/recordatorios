@@ -65,12 +65,8 @@ fun Activity.confirmarBorrado(r: Recordatorio, alTerminar: () -> Unit) {
         .show()
 }
 
-fun Activity.temaDialogo(): Int {
-    val nocturno = (resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) ==
-        Configuration.UI_MODE_NIGHT_YES
-    return if (nocturno) android.R.style.Theme_DeviceDefault_Dialog_Alert
-           else android.R.style.Theme_DeviceDefault_Light_Dialog_Alert
-}
+/** Diálogos con la paleta de la app; claro u oscuro según el tema activo (values / values-night). */
+fun Activity.temaDialogo(): Int = R.style.DialogoApp
 
 /** Aplica la posposición y avisa hasta cuándo quedó. */
 fun Activity.aplicarPosponer(id: Int, codigo: String): Boolean {
@@ -321,6 +317,9 @@ class MainActivity : Activity() {
             startActivity(Intent(this, PendienteActivity::class.java))
         }
         aviso = findViewById(R.id.aviso)
+        // Diseño "Agenda": el encabezado propio (mes + Ajustes) reemplaza la barra superior.
+        actionBar?.hide()
+        findViewById<View>(R.id.btnAjustes).setOnClickListener { startActivity(Intent(this, AjustesActivity::class.java)) }
         findViewById<Button>(R.id.btnNuevo).setOnClickListener {
             startActivity(Intent(this, EditarActivity::class.java))
         }
@@ -351,7 +350,10 @@ class MainActivity : Activity() {
     private fun actualizarSms() {
         val suspendidos = SuspensionSms.activa(this)
         findViewById<TextView>(R.id.avisoSms).visibility = if (suspendidos) View.VISIBLE else View.GONE
-        findViewById<Button>(R.id.btnSms).text = if (suspendidos) "Reanudar SMS" else "Suspender/Anular SMS"
+        findViewById<Button>(R.id.btnSms).apply {
+            text = if (suspendidos) "Reanudar SMS" else "Suspender/Anular SMS"
+            setTextColor(getColor(if (suspendidos) R.color.rojo else R.color.sms_texto))
+        }
     }
 
     override fun onResume() {
@@ -436,20 +438,25 @@ class MainActivity : Activity() {
         val cumplidosVencidos = ordenar(cumplidos.filter { it.cumplidoVencido }) { it.ocurrencia }
         val archivados = ordenar(visibles.filter { it.archivado }) { it.proxima }
 
-        if (seccion("proximos", "Próximos", proximos.size + pospuestos.size)) {
+        if (seccion("proximos", "Próximos", proximos.size + pospuestos.size, color = R.color.acento)) {
             agregarProximos(proximos)
-            if (pospuestos.isNotEmpty() && seccion("pospuestos", "Pospuestos", pospuestos.size, sub = true))
+            if (pospuestos.isNotEmpty() && seccion("pospuestos", "Pospuestos", pospuestos.size, sub = true, color = R.color.chip_alarma))
                 pospuestos.forEach { agregarItem(it, pospuesto = true, tono = R.color.chip_alarma) }
         }
-        if (seccion("vencidos", "Vencidos", vencidos.size)) vencidos.forEach { agregarItem(it, tono = R.color.rojo) }
-        if (seccion("cumplidos", "Cumplidos", cumplidos.size)) {
-            cumplidosATiempo.forEach { agregarItem(it, tono = R.color.texto3) }
-            if (cumplidosVencidos.isNotEmpty() && seccion("cumplidos_vencidos", "Vencidos", cumplidosVencidos.size, sub = true))
-                cumplidosVencidos.forEach { agregarItem(it, tono = R.color.texto3) }
+        if (seccion("vencidos", "Vencidos", vencidos.size, color = R.color.rojo))
+            vencidos.forEach { agregarItem(it, tono = R.color.rojo, fondo = R.color.rojo_suave) }
+        if (seccion("cumplidos", "Cumplidos", cumplidos.size, color = R.color.chip_cont)) {
+            cumplidosATiempo.forEach { agregarItem(it, tono = R.color.chip_cont) }
+            if (cumplidosVencidos.isNotEmpty() && seccion("cumplidos_vencidos", "Vencidos", cumplidosVencidos.size, sub = true, color = R.color.texto3))
+                cumplidosVencidos.forEach { agregarItem(it, tono = R.color.rojo, gris = true) }
         }
-        if (seccion("archivados", "Archivados", archivados.size)) archivados.forEach { agregarItem(it, tono = R.color.texto3) }
+        if (seccion("archivados", "Archivados", archivados.size, color = R.color.texto3))
+            archivados.forEach { agregarItem(it, tono = R.color.texto3, gris = true) }
         actualizarSeleccion()
-        findViewById<Button>(R.id.btnNotas).text = if (todasNotasOcultas()) "Mostrar notas" else "Ocultar notas"
+        findViewById<Button>(R.id.btnNotas).apply {
+            text = if (todasNotasOcultas()) "Mostrar notas" else "Ocultar notas"
+            marcarChip(this, todasNotasOcultas())
+        }
     }
 
     // ---------- Diseño "Agenda": próximos agrupados por día y tira de la semana ----------
@@ -507,7 +514,7 @@ class MainActivity : Activity() {
             val celda = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
                 gravity = android.view.Gravity.CENTER
-                setBackgroundResource(if (elegido) R.drawable.dia_on else R.drawable.dia)
+                setBackgroundResource(when { elegido -> R.drawable.dia_on; i == 0 -> R.drawable.dia_hoy; else -> R.drawable.dia })
                 minimumHeight = (60 * d).toInt()
                 contentDescription = textoDia(dia)
                 layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
@@ -520,7 +527,7 @@ class MainActivity : Activity() {
                     mostrarLista()
                 }
             }
-            val colorTexto = getColor(if (elegido) R.color.sobre_acento else R.color.texto)
+            val colorTexto = getColor(when { elegido -> R.color.sobre_acento; i == 0 -> R.color.acento; else -> R.color.texto })
             celda.addView(TextView(this).apply {
                 text = letras[dia.dayOfWeek.value - 1]; textSize = 11f
                 setTextColor(if (elegido) colorTexto else getColor(R.color.texto2)); gravity = android.view.Gravity.CENTER
@@ -537,6 +544,12 @@ class MainActivity : Activity() {
             })
             cont.addView(celda)
         }
+    }
+
+    /** Chip "encendido" (relleno suave y texto del color principal) cuando algo modifica la vista de la lista. */
+    private fun marcarChip(b: Button, activo: Boolean) {
+        b.setBackgroundResource(if (activo) R.drawable.chip_activo else R.drawable.chip)
+        b.setTextColor(getColor(if (activo) R.color.acento else R.color.texto))
     }
 
     /** Etiqueta de color (Alarma, repetición, contactos…). */
@@ -597,8 +610,12 @@ class MainActivity : Activity() {
 
     private fun actualizarFiltroYOrden() {
         val f = vista().getString("filtro", "todos")
-        findViewById<Button>(R.id.btnFiltro).text = "⏷ Filtro: " + textoFiltro()
-        findViewById<Button>(R.id.btnOrden).text = "⇅ Orden"
+        findViewById<Button>(R.id.btnFiltro).apply { text = "⏷ Filtro: " + textoFiltro(); marcarChip(this, f != "todos") }
+        findViewById<Button>(R.id.btnOrden).apply {
+            val o = vista().getString("orden", "fecha_asc")
+            text = if (o == "fecha_asc") "⇅ Orden" else "⇅ " + ORDENES.first { it.first == o }.second.substringBefore(" (")
+            marcarChip(this, o != "fecha_asc")
+        }
         findViewById<TextView>(R.id.avisoFiltro).apply {
             visibility = if (f == "todos") View.GONE else View.VISIBLE
             text = "Mostrando solo: ${textoFiltro()} · tocá para ver todos"
@@ -702,10 +719,11 @@ class MainActivity : Activity() {
     private fun guardarSeccionesCerradas(c: Set<String>) = vista().edit().putStringSet("secciones_cerradas", c).apply()
 
     /** Dibuja el título de la sección (si tiene elementos) y devuelve true si está expandida. */
-    private fun seccion(clave: String, texto: String, cantidad: Int, sub: Boolean = false): Boolean {
+    private fun seccion(clave: String, texto: String, cantidad: Int, sub: Boolean = false, color: Int = R.color.texto): Boolean {
         if (cantidad == 0) return false
         val cerrada = clave in seccionesCerradas()
         agregarTitulo((if (cerrada) "▸ " else "▾ ") + "$texto ($cantidad)", sub)
+        (lista.getChildAt(lista.childCount - 1) as TextView).setTextColor(getColor(color))
         (lista.getChildAt(lista.childCount - 1) as TextView).setOnClickListener {
             val c = seccionesCerradas()
             if (cerrada) c -= clave else c += clave
@@ -731,8 +749,12 @@ class MainActivity : Activity() {
         findViewById<LinearLayout>(R.id.barraSeleccion).visibility = if (modoSeleccion) View.VISIBLE else View.GONE
         findViewById<TextView>(R.id.tvSeleccion).text = "${seleccionados.size} seleccionado(s)"
         val sc = seccionesCerradas()
-        findViewById<Button>(R.id.btnSecciones).text = "Secciones " + if (SECCIONES.all { it in sc }) "▸" else "▾"
-        findViewById<Button>(R.id.btnSubsecciones).text = "Subsecciones " + if (SUBSECCIONES.all { it in sc }) "▸" else "▾"
+        findViewById<Button>(R.id.btnSecciones).apply {
+            text = "Secciones " + if (SECCIONES.all { it in sc }) "▸" else "▾"; marcarChip(this, SECCIONES.any { it in sc })
+        }
+        findViewById<Button>(R.id.btnSubsecciones).apply {
+            text = "Subsecciones " + if (SUBSECCIONES.all { it in sc }) "▸" else "▾"; marcarChip(this, SUBSECCIONES.any { it in sc })
+        }
     }
 
     @Deprecated("API de plataforma")
@@ -779,11 +801,14 @@ class MainActivity : Activity() {
     private fun agregarTitulo(texto: String, sub: Boolean = false) {
         val v = layoutInflater.inflate(R.layout.item_titulo, lista, false) as TextView
         v.text = texto
+        val d = resources.displayMetrics.density
         if (sub) {
             v.textSize = 13f
-            v.setPadding(v.paddingLeft * 3, v.paddingTop / 2, v.paddingRight, v.paddingBottom)
+            v.setPadding((20 * d).toInt(), v.paddingTop / 2, v.paddingRight, v.paddingBottom)
         } else {
-            v.textSize = 19f
+            v.textSize = 13f
+            v.letterSpacing = 0.08f
+            v.isAllCaps = true
         }
         lista.addView(v)
     }
@@ -807,8 +832,18 @@ class MainActivity : Activity() {
      * hacia el siguiente del mismo día. [tono]: color del punto (verde azulado, rojo para vencidos, gris…).
      */
     private fun agregarItem(r: Recordatorio, pospuesto: Boolean = false, conHora: Boolean = false,
-                            conLinea: Boolean = false, tono: Int = R.color.acento) {
+                            conLinea: Boolean = false, tono: Int = R.color.acento,
+                            fondo: Int? = null, gris: Boolean = false) {
         val v = layoutInflater.inflate(R.layout.item_recordatorio, lista, false)
+        val d = resources.displayMetrics.density
+        if (fondo != null) {   // tarjeta de color suave (ej. vencidos en rojo suave)
+            v.setBackgroundResource(R.drawable.tarjeta)
+            v.backgroundTintList = android.content.res.ColorStateList.valueOf(getColor(fondo))
+            v.setPadding((6 * d).toInt(), (6 * d).toInt(), (6 * d).toInt(), 0)
+            v.layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT).apply { bottomMargin = (8 * d).toInt() }
+        }
+        if (gris) v.alpha = 0.6f
         v.findViewById<TextView>(R.id.titulo).text =
             r.titulo
         v.findViewById<View>(R.id.linea).visibility = if (conLinea) View.VISIBLE else View.INVISIBLE
@@ -830,14 +865,15 @@ class MainActivity : Activity() {
         } + (if (r.archivado) " · Archivado" else "")
         if (tvDetalle.text.isNullOrBlank()) tvDetalle.visibility = View.GONE
         if (pospuesto) v.setPadding(v.paddingLeft * 3, v.paddingTop, v.paddingRight, v.paddingBottom)
-        else if (!r.activo && !r.cumplido) v.alpha = 0.55f
+        // Vencidos: ya no se atenúan; se distinguen por la tarjeta rojo suave.
         // "Hecho" en la notificación: marca para revisar y confirmar el cumplimiento.
         if (r.revisar && !r.cumplido) {
+            v.backgroundTintList = null
             v.setBackgroundColor(getColor(R.color.revisar))
             v.findViewById<TextView>(R.id.titulo).text = "⚑ " + r.titulo
             v.findViewById<TextView>(R.id.detalle).append("\nRevisar: se marcó «Hecho». ¿Lo das por cumplido?")
         }
-        if (modoSeleccion && r.id in seleccionados) v.setBackgroundColor(getColor(R.color.seleccion))
+        if (modoSeleccion && r.id in seleccionados) { v.backgroundTintList = null; v.setBackgroundColor(getColor(R.color.seleccion)) }
         val nota = textoNota(r, pospuesto)
         if (nota.isNotEmpty()) {
             val clave = r.id.toString()

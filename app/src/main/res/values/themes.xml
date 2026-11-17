@@ -79,6 +79,22 @@
         <item name="android:minHeight">48dp</item>
     </style>
 
+    <!-- Diálogos (Filtro, Orden, Acciones…): esquinas redondeadas y colores de la paleta. -->
+    <style name="DialogoApp" parent="android:Theme.DeviceDefault.Light.Dialog.Alert">
+        <item name="android:windowBackground">@drawable/dialogo</item>
+        <item name="android:colorAccent">@color/acento</item>
+        <item name="android:colorPrimary">@color/acento</item>
+        <item name="android:colorControlActivated">@color/acento</item>
+        <item name="android:textColorPrimary">@color/texto</item>
+        <item name="android:textColorSecondary">@color/texto2</item>
+        <item name="android:buttonBarButtonStyle">@style/BotonDialogo</item>
+    </style>
+    <style name="BotonDialogo" parent="android:Widget.DeviceDefault.Button.Borderless">
+        <item name="android:textColor">@color/acento</item>
+        <item name="android:textAllCaps">false</item>
+        <item name="android:fontFamily">sans-serif-medium</item>
+    </style>
+
     <!-- Para la ventanita de "Posponer…": solo se ve el diálogo. -->
     <style name="TemaTransparente" parent="android:Theme.Translucent.NoTitleBar">
         <item name="android:windowNoTitle">true</item>

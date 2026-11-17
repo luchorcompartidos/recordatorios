@@ -7,6 +7,70 @@
     android:background="@color/fondo"
     android:orientation="vertical">
 
+    <!-- Franja independiente de SMS (arriba de todo, discreta; en rojo cuando están suspendidos) -->
+    <LinearLayout
+        android:id="@+id/franjaSms"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="@color/sms_franja"
+        android:orientation="vertical">
+
+        <Button
+            android:id="@+id/btnSms"
+            style="?android:attr/borderlessButtonStyle"
+            android:layout_width="match_parent"
+            android:layout_height="40dp"
+            android:minHeight="40dp"
+            android:fontFamily="sans-serif-medium"
+            android:text="Suspender/Anular SMS"
+            android:textAllCaps="false"
+            android:textColor="@color/sms_texto"
+            android:textSize="14sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/avisoSms"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:background="@color/rojo_suave"
+            android:gravity="center"
+            android:padding="8dp"
+            android:text="Envíos SMS se encuentran SUSPENDIDOS/ANULADOS"
+            android:textColor="@color/rojo"
+            android:textSize="14sp"
+            android:textStyle="bold"
+            android:visibility="gone" />
+    </LinearLayout>
+
+    <!-- Encabezado: mes y acceso a Ajustes -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingStart="20dp"
+        android:paddingTop="14dp"
+        android:paddingEnd="14dp"
+        android:paddingBottom="4dp">
+
+        <TextView
+            android:id="@+id/tvSemana"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:fontFamily="sans-serif-black"
+            android:textColor="@color/texto"
+            android:textSize="26sp" />
+
+        <ImageButton
+            android:id="@+id/btnAjustes"
+            android:layout_width="44dp"
+            android:layout_height="44dp"
+            android:background="@drawable/dia"
+            android:contentDescription="Ajustes"
+            android:src="@drawable/ic_ajustes" />
+    </LinearLayout>
+
     <TextView
         android:id="@+id/aviso"
         android:layout_width="match_parent"
@@ -35,16 +99,6 @@
         android:visibility="gone" />
 
     <!-- Tira de la semana: tocar un día filtra por ese día; tocarlo de nuevo vuelve a "Todos". -->
-    <TextView
-        android:id="@+id/tvSemana"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:paddingHorizontal="20dp"
-        android:paddingTop="2dp"
-        android:textColor="@color/texto2"
-        android:textSize="13sp"
-        android:fontFamily="sans-serif-medium" />
-
     <LinearLayout
         android:id="@+id/semana"
         android:layout_width="match_parent"
@@ -190,33 +244,9 @@
                     style="@style/Boton.Chip"
                     android:layout_width="wrap_content"
                     android:layout_height="40dp"
-                    android:layout_marginEnd="8dp"
                     android:text="Ocultar notas" />
-
-                <Button
-                    android:id="@+id/btnSms"
-                    style="@style/Boton.Chip"
-                    android:layout_width="wrap_content"
-                    android:layout_height="40dp"
-                    android:text="Suspender/Anular SMS" />
             </LinearLayout>
         </HorizontalScrollView>
-
-        <TextView
-            android:id="@+id/avisoSms"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginHorizontal="16dp"
-            android:layout_marginBottom="6dp"
-            android:background="@drawable/boton"
-            android:backgroundTint="@color/rojo_suave"
-            android:gravity="center"
-            android:padding="10dp"
-            android:text="Envíos SMS se encuentran SUSPENDIDOS/ANULADOS"
-            android:textColor="@color/rojo"
-            android:textSize="14sp"
-            android:textStyle="bold"
-            android:visibility="gone" />
 
         <TextView
             android:id="@+id/avisoFiltro"

@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Hoy: mismo relleno sutil con borde del color principal (distinto del día elegido como filtro). -->
+<ripple xmlns:android="http://schemas.android.com/apk/res/android" android:color="?android:attr/colorControlHighlight">
+    <item><shape android:shape="rectangle"><corners android:radius="14dp" /><solid android:color="@color/acento_suave" /><stroke android:width="2dp" android:color="@color/acento" /></shape></item>
+</ripple>
