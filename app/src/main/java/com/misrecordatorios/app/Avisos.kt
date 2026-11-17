@@ -492,6 +492,25 @@ object Estados {
     fun ocurrenciaACumplir(r: Recordatorio): Long =
         if (r.pospuestoHasta > 0 && r.ultimaVez > 0 && r.repeticion != Repeticion.NINGUNA && r.activo) r.ultimaVez else r.proxima
 
+    /** Cumplido "apagado" (en gris) o encendido, a mano. */
+    fun apagar(ctx: Context, id: Int, apagado: Boolean) {
+        val r = Repositorio.obtener(ctx, id) ?: return
+        r.apagado = apagado
+        Repositorio.guardar(ctx, r)
+    }
+
+    /**
+     * Un cumplido se ve "encendido" solo si viene de un recordatorio que se repite y sigue vigente
+     * (activo, no archivado ni cumplido) y no se apagó a mano. Los cumplidos viejos, sin [Recordatorio.origen],
+     * se relacionan por el título.
+     */
+    fun cumplidoEncendido(r: Recordatorio, todos: List<Recordatorio>): Boolean {
+        if (!r.cumplido || r.apagado) return false
+        val vigente = { o: Recordatorio -> o.id != r.id && o.activo && !o.archivado && !o.cumplido && o.repeticion != Repeticion.NINGUNA }
+        return if (r.origen > 0) todos.any { it.id == r.origen && vigente(it) }
+               else todos.any { vigente(it) && it.titulo.trim().equals(r.titulo.trim(), ignoreCase = true) }
+    }
+
     /** Marca un cumplido "fuera de término" como cumplido a tiempo (el usuario lo hizo en fecha y lo registró tarde). */
     fun marcarATiempo(ctx: Context, id: Int) {
         val r = Repositorio.obtener(ctx, id) ?: return
@@ -526,7 +545,7 @@ object Estados {
                 id = Repositorio.nuevoId(ctx), proxima = ocurrencia, activo = false, cumplido = true,
                 cumplidoEn = if (aTiempo) minOf(ahora, ocurrencia) else ahora, ocurrencia = ocurrencia, revisar = false, pospuestoHasta = 0,
                 repeticion = Repeticion.NINGUNA, dias = mutableSetOf(), historialSms = r.historialSms.toMutableList(),
-                contactos = r.contactos?.toMutableSet(), excluidos = r.excluidos.toMutableSet()
+                contactos = r.contactos?.toMutableSet(), excluidos = r.excluidos.toMutableSet(), origen = r.id
             )
             Repositorio.guardar(ctx, copia)
             if (r.proxima == ocurrencia) { r.ocurrencias++; r.ultimaVez = ocurrencia; r.proxima = siguiente }

@@ -50,9 +50,10 @@ data class Recordatorio(
     var ultimaVez: Long = 0,        // última vez que sonó por su fecha
     var omitirSmsPrevio: Boolean = false,  // no enviar el SMS anticipatorio (15 min antes)
     var omitirSmsAhora: Boolean = false,   // no enviar el SMS de la hora exacta del evento
-    var convertirSms: Boolean = false      // en SMS, convertir caracteres que fuerzan Unicode
+    var convertirSms: Boolean = false,     // en SMS, convertir caracteres que fuerzan Unicode
+    var origen: Int = 0,            // en un cumplido de una ocurrencia: id del recordatorio que se repite
+    var apagado: Boolean = false    // cumplido "apagado" a mano: se ve en gris
 ) {
-    /** Cumplido después de su fecha/hora → subsección "Vencidos" de Cumplidos. */
     /** Cumplido después del DÍA del vencimiento (cumplirlo ese mismo día, a cualquier hora, cuenta como a tiempo). */
     val cumplidoVencido get() = cumplido && Calculo.zdt(cumplidoEn).toLocalDate().isAfter(Calculo.zdt(ocurrencia).toLocalDate())
     fun aJson(): JSONObject = JSONObject()
@@ -67,7 +68,7 @@ data class Recordatorio(
         .put("excl", JSONArray(excluidos.toList()))
         .put("cumpl", cumplido).put("cumplEn", cumplidoEn).put("ocurr_c", ocurrencia)
         .put("arch", archivado).put("revisar", revisar).put("ultVez", ultimaVez)
-        .put("omPrev", omitirSmsPrevio).put("omAhora", omitirSmsAhora).put("convSms", convertirSms)
+        .put("omPrev", omitirSmsPrevio).put("omAhora", omitirSmsAhora).put("convSms", convertirSms).put("origen", origen).put("apagado", apagado)
         .apply { contactos?.let { put("contactos", JSONArray(it.toList())) } }
 
     companion object {
@@ -100,7 +101,9 @@ data class Recordatorio(
                 ultimaVez = o.optLong("ultVez", 0),
                 omitirSmsPrevio = o.optBoolean("omPrev", false),
                 omitirSmsAhora = o.optBoolean("omAhora", false),
-                convertirSms = o.optBoolean("convSms", false)
+                convertirSms = o.optBoolean("convSms", false),
+                origen = o.optInt("origen", 0),
+                apagado = o.optBoolean("apagado", false)
             )
         }
     }

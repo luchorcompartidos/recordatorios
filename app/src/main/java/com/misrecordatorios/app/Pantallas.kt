@@ -471,7 +471,7 @@ class MainActivity : Activity() {
         if (seccion("vencidos", "Vencidos", vencidos.size, color = R.color.rojo))
             vencidos.forEach { agregarItem(it, tono = R.color.rojo, fondo = R.color.rojo_suave) }
         if (seccion("cumplidos", "Cumplidos", cumplidos.size, color = R.color.chip_cont)) {
-            cumplidosATiempo.forEach { agregarItem(it, tono = R.color.chip_cont) }
+            cumplidosATiempo.forEach { agregarItem(it, tono = R.color.chip_cont, gris = !Estados.cumplidoEncendido(it, todos)) }
             if (cumplidosVencidos.isNotEmpty() && seccion("cumplidos_vencidos", "Vencidos", cumplidosVencidos.size, sub = true, color = R.color.texto3))
                 cumplidosVencidos.forEach { agregarItem(it, tono = R.color.rojo, gris = true) }
         }
@@ -1013,6 +1013,20 @@ class MainActivity : Activity() {
             )
             if (!r.cumplido && !r.archivado) opciones += "Dar por Cumplida" to { confirmarCumplir(r.id) { mostrarLista() } }
             if (r.revisar) opciones += "Quitar marca «Revisar»" to { Estados.quitarRevisar(this, r.id); mostrarLista() }
+            if (!r.archivado) opciones += "Archivar" to {
+                confirmar("Archivar", "¿Archivar «${r.titulo}»? Deja de sonar y de enviar avisos. " +
+                    "Se puede restaurar desde Archivados.") { Estados.archivar(this, listOf(r.id)); mostrarLista() }
+            } else opciones += "Restaurar desde Archivados" to {
+                confirmar("Restaurar", "¿Restaurar «${r.titulo}»? Si tiene fecha futura, vuelve a sonar.") {
+                    Estados.restaurar(this, listOf(r.id)); mostrarLista()
+                }
+            }
+            if (r.cumplido && !r.cumplidoVencido && !r.archivado) {
+                if (Estados.cumplidoEncendido(r, Repositorio.todos(this)))
+                    opciones += "Apagar (ver en gris)" to { Estados.apagar(this, r.id, true); mostrarLista() }
+                else if (r.apagado && Estados.cumplidoEncendido(r.copy(apagado = false), Repositorio.todos(this)))
+                    opciones += "Encender" to { Estados.apagar(this, r.id, false); mostrarLista() }
+            }
             if (r.cumplidoVencido) opciones += "Marcar como cumplida a tiempo" to {
                 confirmar("Cumplida a tiempo", "«${r.titulo}» pasa de Cumplidos → Vencidos a Cumplidos, " +
                     "como si se hubiera cumplido el ${Formato.completo(r.ocurrencia)}.") {
