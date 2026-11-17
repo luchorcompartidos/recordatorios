@@ -488,7 +488,21 @@ object Estados {
      *   sigue en Próximos desde la siguiente.
      * - Si no se repite (o era la última): el propio recordatorio pasa a Cumplidos.
      */
-    fun cumplir(ctx: Context, id: Int): Recordatorio? {
+    /** Ocurrencia que se daría por cumplida ahora (la misma lógica que [cumplir]). */
+    fun ocurrenciaACumplir(r: Recordatorio): Long =
+        if (r.pospuestoHasta > 0 && r.ultimaVez > 0 && r.repeticion != Repeticion.NINGUNA && r.activo) r.ultimaVez else r.proxima
+
+    /** Marca un cumplido "fuera de término" como cumplido a tiempo (el usuario lo hizo en fecha y lo registró tarde). */
+    fun marcarATiempo(ctx: Context, id: Int) {
+        val r = Repositorio.obtener(ctx, id) ?: return
+        if (!r.cumplido) return
+        r.cumplidoEn = r.ocurrencia
+        Repositorio.guardar(ctx, r)
+        Registro.anotar(ctx, "#$id marcado como cumplido a tiempo")
+    }
+
+    /** [aTiempo]: se registra como cumplido en el momento de la ocurrencia (se hizo en fecha y se carga tarde). */
+    fun cumplir(ctx: Context, id: Int, aTiempo: Boolean = false): Recordatorio? {
         val r = Repositorio.obtener(ctx, id) ?: return null
         val ahora = System.currentTimeMillis()
         Notificador.quitar(ctx, id)
@@ -510,7 +524,7 @@ object Estados {
             // Registro aparte de la ocurrencia cumplida; el recordatorio sigue desde la próxima.
             val copia = r.copy(
                 id = Repositorio.nuevoId(ctx), proxima = ocurrencia, activo = false, cumplido = true,
-                cumplidoEn = ahora, ocurrencia = ocurrencia, revisar = false, pospuestoHasta = 0,
+                cumplidoEn = if (aTiempo) minOf(ahora, ocurrencia) else ahora, ocurrencia = ocurrencia, revisar = false, pospuestoHasta = 0,
                 repeticion = Repeticion.NINGUNA, dias = mutableSetOf(), historialSms = r.historialSms.toMutableList(),
                 contactos = r.contactos?.toMutableSet(), excluidos = r.excluidos.toMutableSet()
             )
@@ -523,7 +537,7 @@ object Estados {
             return copia
         }
         Programador.cancelar(ctx, id)
-        r.cumplido = true; r.cumplidoEn = ahora; r.ocurrencia = ocurrencia
+        r.cumplido = true; r.cumplidoEn = if (aTiempo) minOf(ahora, ocurrencia) else ahora; r.ocurrencia = ocurrencia
         r.activo = false; r.revisar = false; r.pospuestoHasta = 0
         Repositorio.guardar(ctx, r)
         Registro.anotar(ctx, "#$id dado por cumplido")

@@ -53,7 +53,8 @@ data class Recordatorio(
     var convertirSms: Boolean = false      // en SMS, convertir caracteres que fuerzan Unicode
 ) {
     /** Cumplido después de su fecha/hora → subsección "Vencidos" de Cumplidos. */
-    val cumplidoVencido get() = cumplido && cumplidoEn > ocurrencia
+    /** Cumplido después del DÍA del vencimiento (cumplirlo ese mismo día, a cualquier hora, cuenta como a tiempo). */
+    val cumplidoVencido get() = cumplido && Calculo.zdt(cumplidoEn).toLocalDate().isAfter(Calculo.zdt(ocurrencia).toLocalDate())
     fun aJson(): JSONObject = JSONObject()
         .put("id", id).put("titulo", titulo).put("nota", nota)
         .put("proxima", proxima).put("rep", repeticion.codigo)

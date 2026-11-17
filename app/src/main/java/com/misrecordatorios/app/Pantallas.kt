@@ -45,12 +45,24 @@ fun Activity.confirmarCumplir(id: Int, alTerminar: () -> Unit) {
         .setMessage("¿Dar por cumplida «${r.titulo}»" +
             (if (repite) " (ocurrencia del ${Formato.completo(r.proxima)})? El recordatorio sigue desde la próxima ocurrencia."
              else "?"))
-        .setPositiveButton("Dar por Cumplida") { _, _ ->
-            val c = Estados.cumplir(this, id)
-            if (c != null) Toast.makeText(this,
-                if (c.cumplidoVencido) "Cumplida (fuera de término): pasa a Cumplidos → Vencidos" else "Cumplida: pasa a Cumplidos",
-                Toast.LENGTH_LONG).show()
-            alTerminar()
+        .let { b ->
+            fun cumplir(aTiempo: Boolean) {
+                val c = Estados.cumplir(this, id, aTiempo)
+                if (c != null) Toast.makeText(this,
+                    if (c.cumplidoVencido) "Cumplida (fuera de término): pasa a Cumplidos → Vencidos" else "Cumplida: pasa a Cumplidos",
+                    Toast.LENGTH_LONG).show()
+                alTerminar()
+            }
+            // Si ya pasó el día del vencimiento, se puede registrar como hecha a tiempo (se cargó con demora).
+            val ocurrencia = Estados.ocurrenciaACumplir(r)
+            val tarde = java.time.LocalDate.now().isAfter(Calculo.zdt(ocurrencia).toLocalDate())
+            if (tarde) {
+                b.setMessage("«${r.titulo}» vencía el ${Formato.completo(ocurrencia)}. ¿La hiciste a tiempo y la estás " +
+                    "registrando ahora, o la cumpliste tarde?" + (if (repite) " El recordatorio sigue desde la próxima ocurrencia." else ""))
+                b.setPositiveButton("La hice a tiempo") { _, _ -> cumplir(true) }
+                b.setNeutralButton("La cumplí tarde") { _, _ -> cumplir(false) }
+            } else b.setPositiveButton("Dar por Cumplida") { _, _ -> cumplir(false) }
+            b
         }
         .setNegativeButton("Cancelar", null)
         .show()
@@ -1001,6 +1013,12 @@ class MainActivity : Activity() {
             )
             if (!r.cumplido && !r.archivado) opciones += "Dar por Cumplida" to { confirmarCumplir(r.id) { mostrarLista() } }
             if (r.revisar) opciones += "Quitar marca «Revisar»" to { Estados.quitarRevisar(this, r.id); mostrarLista() }
+            if (r.cumplidoVencido) opciones += "Marcar como cumplida a tiempo" to {
+                confirmar("Cumplida a tiempo", "«${r.titulo}» pasa de Cumplidos → Vencidos a Cumplidos, " +
+                    "como si se hubiera cumplido el ${Formato.completo(r.ocurrencia)}.") {
+                    Estados.marcarATiempo(this, r.id); mostrarLista()
+                }
+            }
             opciones += "Borrar" to { confirmarBorrado(r) { mostrarLista() } }
             AlertDialog.Builder(this, temaDialogo())
                 .setTitle(r.titulo)
