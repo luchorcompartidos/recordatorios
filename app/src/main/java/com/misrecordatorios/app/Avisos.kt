@@ -410,8 +410,6 @@ object Formato {
         val veces = if (r.limite > 0 && r.repeticion != Repeticion.NINGUNA) " · ${r.ocurrencias}/${r.limite} veces" else ""
         return rep + veces
     }
-
-    fun hora(ms: Long): String = Calculo.zdt(ms).format(fHora)
 }
 
 /** Suena la alarma: muestra la notificación y programa la próxima. */
